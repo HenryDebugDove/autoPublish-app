@@ -2,6 +2,7 @@ package com.ven.assists.simple.weibo
 
 import android.content.ContentValues
 import android.graphics.Path
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -52,6 +53,7 @@ object WeiboPublisher {
 
     private const val TEMP_SUB_DIR = "weibo_album_temp"
     private var lastCreatedAlbumName: String? = null
+    private val savedImageUris = mutableListOf<Uri>()
 
     data class Context(
         val log: (String) -> Unit,
@@ -59,10 +61,40 @@ object WeiboPublisher {
         val showPointEffect: suspend (Float, Float, String) -> Unit
     )
 
-    private val WEIBO_IMAGE_URLS = listOf(
-        "https://yxx-1251927313.image.myqcloud.com/user/926182/2025-11-21/46691fc7fa4bb86",
-        "https://yxx-1251927313.image.myqcloud.com/user/926182/2025-11-21/51691fc801c4ae6"
+    private const val IMAGE_BASE_URL = "https://yxx-1251927313.image.myqcloud.com"
+    private val WEIBO_IMAGE_PATHS = listOf(
+        "user/926182/2025-12-01/70692d04d1b89da",
+        "user/926182/2025-12-01/28692d04d63b0c5",
+        "user/926182/2025-12-01/29692d04d877f85",
+        "user/926182/2025-12-01/22692d04dae4f72",
+        "user/926182/2025-12-01/65692d04dd46828",
+        "user/926182/2025-11-21/46691fc7fa4bb86",
+        "user/926182/2025-11-21/42691fc7fc91f10",
+        "user/926182/2025-11-21/52691fc7ff29f33",
+        "user/926182/2025-11-21/51691fc801c4ae6",
+        "user/926182/2025-11-21/91691fc8043c625",
+        "user/926182/2025-11-21/64691fc80681e3f",
+        "user/926182/2025-12-01/51692d04cd0d53b",
+        "user/926182/2025-12-01/91692d04cf5c119",
+        "user/926182/2025-11-21/35691fc808c4deb",
+        "user/926182/2025-12-01/39692d04c38fc92",
+        "user/926182/2025-12-01/40692d04c5d7782",
+        "user/926182/2025-12-01/49692d04c85406c",
+        "user/926182/2025-12-01/25692d04cac3c16",
+        "user/926182/2025-11-21/91691fc80b1e328",
+        "user/926182/2025-11-21/85691fc80d95b47",
+        "user/926182/2025-11-21/44691fc81024fa7",
+        "user/926182/2025-11-21/24691fc81273697",
+        "user/926182/2025-11-21/35691fc814ad547",
+        "user/926182/2025-11-21/74691fc81707c34",
+        "user/926182/2025-11-21/68691fc8196b3fe",
+        "user/926182/2025-11-21/91691fc81be8bab",
+        "user/926182/2025-11-21/32691fc81e62084",
+        "user/926182/2025-11-21/10691fc823973c9",
+        "user/926182/2025-11-21/76691fc82608aa8",
+        "user/926182/2025-11-21/17691fc8287ba81"
     )
+    private val WEIBO_IMAGE_URLS = WEIBO_IMAGE_PATHS.map { "$IMAGE_BASE_URL/$it" }
 
     suspend fun publish(context: Context) = with(context) {
         if (!prepareWeiboAlbumImages(log)) {
@@ -234,6 +266,7 @@ object WeiboPublisher {
         delay(500)
         if (clickSendButton()) {
             log("✅ 微博发布流程完成")
+            cleanupWeiboAlbumResources(log)
         } else {
             log("❌ 未找到发送按钮")
         }
@@ -241,6 +274,7 @@ object WeiboPublisher {
 
     private suspend fun prepareWeiboAlbumImages(log: (String) -> Unit): Boolean {
         lastCreatedAlbumName = null
+        savedImageUris.clear()
         val service = AssistsService.instance ?: run {
             log("❌ AssistsService 未初始化，无法下载微博图片")
             return false
@@ -248,8 +282,10 @@ object WeiboPublisher {
         val albumName = generateRandomAlbumName()
         log("准备下载微博素材图片，目标相册：$albumName")
         val tempFiles = mutableListOf<File>()
+        val selectedUrls = WEIBO_IMAGE_URLS.shuffled().take(2)
+        log("本次将下载 ${selectedUrls.size} 张随机素材")
         try {
-            WEIBO_IMAGE_URLS.forEachIndexed { index, url ->
+            selectedUrls.forEachIndexed { index, url ->
                 when (val result = FileDownloadUtil.downloadFile(
                     service,
                     url,
@@ -272,13 +308,13 @@ object WeiboPublisher {
                 if (saveImageToAlbum(service, file, albumName, index)) 1 else 0
             }.sum()
 
-            return if (savedCount == WEIBO_IMAGE_URLS.size) {
+            return if (savedCount == selectedUrls.size) {
                 lastCreatedAlbumName = albumName
                 log("✅ 已创建相册：$albumName，并保存所有素材图片")
                 true
             } else {
                 lastCreatedAlbumName = null
-                log("❌ 仅成功保存 $savedCount/${WEIBO_IMAGE_URLS.size} 张图片到相册 $albumName")
+                log("❌ 仅成功保存 $savedCount/${selectedUrls.size} 张图片到相册 $albumName")
                 false
             }
         } catch (e: Exception) {
@@ -333,11 +369,53 @@ object WeiboPublisher {
                 }
                 resolver.update(uri, pendingValues, null, null)
             }
+            savedImageUris += uri
             true
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             false
         }
+    }
+
+    private fun cleanupWeiboAlbumResources(log: (String) -> Unit) {
+        val service = AssistsService.instance ?: run {
+            log("⚠️ AssistsService 未初始化，无法清理相册资源")
+            return
+        }
+        val resolver = service.contentResolver
+        if (savedImageUris.isEmpty()) {
+            log("未记录到需要清理的图片Uri")
+        } else {
+            savedImageUris.forEach { uri ->
+                runCatching { resolver.delete(uri, null, null) }
+            }
+            log("已删除 ${savedImageUris.size} 张素材图片")
+            savedImageUris.clear()
+        }
+        lastCreatedAlbumName?.let { album ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val relativePath = Environment.DIRECTORY_PICTURES + File.separator + album
+                runCatching {
+                    resolver.delete(
+                        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                        "${MediaStore.Images.Media.RELATIVE_PATH}=?",
+                        arrayOf(relativePath)
+                    )
+                }.onSuccess { log("已清理相册(RELATIVE_PATH): $album") }
+                    .onFailure { log("⚠️ 删除相册(RELATIVE_PATH)失败: ${it.message}") }
+            } else {
+                val picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                val albumDir = File(picturesDir, album)
+                if (albumDir.exists()) {
+                    runCatching { albumDir.deleteRecursively() }
+                        .onFailure { log("⚠️ 删除相册目录失败: ${it.message}") }
+                        .onSuccess { log("已删除相册目录: $album") }
+                } else {
+                    log("未找到需要删除的相册目录: $album")
+                }
+            }
+        }
+        lastCreatedAlbumName = null
     }
 
     private fun generateRandomAlbumName(): String {

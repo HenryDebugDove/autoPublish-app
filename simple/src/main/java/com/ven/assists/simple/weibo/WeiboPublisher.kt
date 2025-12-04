@@ -29,7 +29,9 @@ import com.ven.assists.window.AssistsWindowManager
 import com.ven.assists.window.AssistsWindowManager.nonTouchableByAll
 import com.ven.assists.window.AssistsWindowManager.touchableByAll
 import kotlinx.coroutines.delay
+import org.json.JSONArray
 import java.io.File
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,7 +46,8 @@ object WeiboPublisher {
      * 微博文案尾部标签，可在外部进行配置。
      * 例如：#前端收徒#、#日常记录# 等
      */
-    var tailTag: String = "#前端收徒# #前端教学# #前端入门# #程序员#" 
+//    var tailTag: String = "#前端收徒# #前端教学# #前端入门# #程序员#"
+      var tailTag: String = "#python收徒# #python教学# #python入门# #程序员#"
         @Synchronized get
         @Synchronized set
 
@@ -62,39 +65,34 @@ object WeiboPublisher {
     )
 
     private const val IMAGE_BASE_URL = "https://yxx-1251927313.image.myqcloud.com"
-    private val WEIBO_IMAGE_PATHS = listOf(
-        "user/926182/2025-12-01/70692d04d1b89da",
-        "user/926182/2025-12-01/28692d04d63b0c5",
-        "user/926182/2025-12-01/29692d04d877f85",
-        "user/926182/2025-12-01/22692d04dae4f72",
-        "user/926182/2025-12-01/65692d04dd46828",
-        "user/926182/2025-11-21/46691fc7fa4bb86",
-        "user/926182/2025-11-21/42691fc7fc91f10",
-        "user/926182/2025-11-21/52691fc7ff29f33",
-        "user/926182/2025-11-21/51691fc801c4ae6",
-        "user/926182/2025-11-21/91691fc8043c625",
-        "user/926182/2025-11-21/64691fc80681e3f",
-        "user/926182/2025-12-01/51692d04cd0d53b",
-        "user/926182/2025-12-01/91692d04cf5c119",
-        "user/926182/2025-11-21/35691fc808c4deb",
-        "user/926182/2025-12-01/39692d04c38fc92",
-        "user/926182/2025-12-01/40692d04c5d7782",
-        "user/926182/2025-12-01/49692d04c85406c",
-        "user/926182/2025-12-01/25692d04cac3c16",
-        "user/926182/2025-11-21/91691fc80b1e328",
-        "user/926182/2025-11-21/85691fc80d95b47",
-        "user/926182/2025-11-21/44691fc81024fa7",
-        "user/926182/2025-11-21/24691fc81273697",
-        "user/926182/2025-11-21/35691fc814ad547",
-        "user/926182/2025-11-21/74691fc81707c34",
-        "user/926182/2025-11-21/68691fc8196b3fe",
-        "user/926182/2025-11-21/91691fc81be8bab",
-        "user/926182/2025-11-21/32691fc81e62084",
-        "user/926182/2025-11-21/10691fc823973c9",
-        "user/926182/2025-11-21/76691fc82608aa8",
-        "user/926182/2025-11-21/17691fc8287ba81"
-    )
-    private val WEIBO_IMAGE_URLS = WEIBO_IMAGE_PATHS.map { "$IMAGE_BASE_URL/$it" }
+    private const val UPLOADED_IMAGES_JSON_PATH = "weibo/uploaded_images.json"
+    
+    private fun getWeiboImagePaths(): List<String> {
+        val service = AssistsService.instance ?: run {
+            android.util.Log.e("WeiboPublisher", "AssistsService 未初始化，无法读取图片路径列表")
+            return emptyList()
+        }
+        return try {
+            val inputStream: InputStream = service.assets.open(UPLOADED_IMAGES_JSON_PATH)
+            val jsonString = inputStream.bufferedReader().use { it.readText() }
+            val jsonArray = JSONArray(jsonString)
+            val paths = mutableListOf<String>()
+            for (i in 0 until jsonArray.length()) {
+                paths.add(jsonArray.getString(i))
+            }
+            android.util.Log.d("WeiboPublisher", "成功从 JSON 文件读取 ${paths.size} 条图片路径")
+            paths
+        } catch (e: Exception) {
+            android.util.Log.e("WeiboPublisher", "读取图片路径 JSON 文件失败: ${e.message}", e)
+            emptyList()
+        }
+    }
+    
+    private val WEIBO_IMAGE_PATHS: List<String>
+        get() = getWeiboImagePaths()
+    
+    private val WEIBO_IMAGE_URLS: List<String>
+        get() = WEIBO_IMAGE_PATHS.map { "$IMAGE_BASE_URL/$it" }
 
     suspend fun publish(context: Context) = with(context) {
         if (!prepareWeiboAlbumImages(log)) {
@@ -264,6 +262,8 @@ object WeiboPublisher {
 
         log("步骤6: 查找并点击发送按钮")
         delay(500)
+        log("等待3秒后再点击发送按钮...")
+        delay(3000)
         if (clickSendButton()) {
             log("✅ 微博发布流程完成")
             cleanupWeiboAlbumResources(log)

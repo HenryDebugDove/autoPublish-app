@@ -9,7 +9,8 @@
         android:id="@+id/actionContainer"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_gravity="center_vertical|start"
+        android:layout_gravity="center_vertical|end"
+        android:layout_marginEnd="56dp"
         android:background="@drawable/bg_quick_ball_actions"
         android:elevation="4dp"
         android:orientation="vertical"
@@ -31,7 +32,7 @@
         android:id="@+id/btnBall"
         android:layout_width="48dp"
         android:layout_height="48dp"
-        android:layout_gravity="center"
+        android:layout_gravity="center_vertical|end"
         android:background="@drawable/bg_quick_ball_circle"
         android:padding="10dp"
         android:src="@android:drawable/ic_input_add" />

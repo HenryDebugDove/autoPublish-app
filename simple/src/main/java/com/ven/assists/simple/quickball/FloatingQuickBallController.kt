@@ -86,7 +86,7 @@ object FloatingQuickBallController {
     }
 
     private fun createDragListener(): View.OnTouchListener {
-        return View.OnTouchListener { _, event ->
+        return View.OnTouchListener { view, event ->
             val wrapper = viewWrapper ?: return@OnTouchListener false
             val params = wrapper.layoutParams
             when (event.action) {
@@ -94,12 +94,16 @@ object FloatingQuickBallController {
                     lastX = event.rawX
                     lastY = event.rawY
                     dragging = false
+                    // 不消费事件，让点击事件可以触发
+                    return@OnTouchListener false
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - lastX
                     val dy = event.rawY - lastY
                     if (!dragging && (abs(dx) > 10 || abs(dy) > 10)) {
                         dragging = true
+                        // 开始拖动时，取消点击事件
+                        view.parent?.requestDisallowInterceptTouchEvent(true)
                     }
                     if (dragging) {
                         params.x -= dx.toInt()
@@ -109,16 +113,20 @@ object FloatingQuickBallController {
                         CoroutineWrapper.launch(isMain = true) {
                             AssistsWindowManager.updateViewLayout(binding?.root, params)
                         }
+                        return@OnTouchListener true
                     }
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (!dragging) {
-                        // Treat as click handled elsewhere
-                        return@OnTouchListener false
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) {
+                        dragging = false
+                        view.parent?.requestDisallowInterceptTouchEvent(false)
+                        return@OnTouchListener true
                     }
+                    // 没有拖动，让点击事件处理
+                    return@OnTouchListener false
                 }
             }
-            dragging
+            false
         }
     }
 
@@ -126,4 +134,5 @@ object FloatingQuickBallController {
     private var lastY = 0f
     private var dragging = false
 }
+
 

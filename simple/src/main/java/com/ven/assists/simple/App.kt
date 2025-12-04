@@ -5,6 +5,7 @@ import com.blankj.utilcode.util.Utils
 import com.ven.assists.AssistsCore
 import com.ven.assists.service.AssistsService
 import com.ven.assists.service.AssistsServiceListener
+import com.ven.assists.simple.control.ControlPanelBridge
 import com.ven.assists.simple.quickball.FloatingQuickBallController
 import com.ven.assists.simple.step.GestureBottomTab
 import com.ven.assists.simple.step.GestureScrollSocial
@@ -52,5 +53,8 @@ class App : Application() {
                 FloatingQuickBallController.show()
             }
         }
+
+        // 启动与控制面板的 WebSocket 连接
+        ControlPanelBridge.start()
     }
 }

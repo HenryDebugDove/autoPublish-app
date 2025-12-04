@@ -14,6 +14,31 @@
         android:gravity="center"
         android:orientation="vertical">
 
+        <!-- 控制面板连接状态与重连按钮 -->
+        <LinearLayout
+            android:id="@+id/ll_control_status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="16dp">
+
+            <TextView
+                android:id="@+id/tv_control_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="控制面板：未连接"
+                android:textColor="@android:color/black"
+                android:textSize="14sp"
+                android:paddingEnd="8dp" />
+
+            <Button
+                android:id="@+id/btn_control_reconnect"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="重试连接" />
+        </LinearLayout>
+
         <Button
             android:id="@+id/btn_enable"
             android:layout_width="wrap_content"

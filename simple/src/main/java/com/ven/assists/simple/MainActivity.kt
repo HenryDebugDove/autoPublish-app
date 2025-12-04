@@ -15,6 +15,7 @@ import androidx.core.view.isVisible
 import com.blankj.utilcode.util.AppUtils
 import com.blankj.utilcode.util.BarUtils
 import com.blankj.utilcode.util.LogUtils
+import com.blankj.utilcode.util.ToastUtils
 import com.blankj.utilcode.util.PermissionUtils
 import com.blankj.utilcode.util.PermissionUtils.SimpleCallback
 import com.lxj.xpopup.XPopup
@@ -22,6 +23,7 @@ import com.ven.assists.AssistsCore
 import com.ven.assists.AssistsCore.logNode
 import com.ven.assists.service.AssistsService
 import com.ven.assists.service.AssistsServiceListener
+import com.ven.assists.simple.control.ControlPanelBridge
 import com.ven.assists.simple.databinding.ActivityMainBinding
 import com.ven.assists.simple.overlays.OverlayAdvanced
 import com.ven.assists.simple.overlays.OverlayBasic
@@ -35,6 +37,9 @@ import kotlinx.coroutines.delay
 
 class MainActivity : AppCompatActivity(), AssistsServiceListener {
     private var isActivityResumed = false
+    private val controlStatusListener: (ControlPanelBridge.ConnectionStatus) -> Unit = { status ->
+        runOnUiThread { updateControlStatus(status) }
+    }
     val viewBind: ActivityMainBinding by lazy {
         ActivityMainBinding.inflate(layoutInflater).apply {
             btnEnable.setOnClickListener {
@@ -81,6 +86,11 @@ class MainActivity : AppCompatActivity(), AssistsServiceListener {
 
                     OverlayWeb.show()
                 }
+            }
+
+            btnControlReconnect.setOnClickListener {
+                ToastUtils.showShort("正在尝试连接控制面板...")
+                ControlPanelBridge.reconnectNow()
             }
         }
     }
@@ -150,6 +160,7 @@ class MainActivity : AppCompatActivity(), AssistsServiceListener {
         BarUtils.setStatusBarLightMode(this, true)
         setContentView(viewBind.root)
         AssistsService.listeners.add(this)
+        ControlPanelBridge.addStatusListener(controlStatusListener)
         checkPermission()
     }
 
@@ -193,6 +204,7 @@ class MainActivity : AppCompatActivity(), AssistsServiceListener {
     override fun onDestroy() {
         super.onDestroy()
         AssistsService.listeners.remove(this)
+        ControlPanelBridge.removeStatusListener(controlStatusListener)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -207,5 +219,20 @@ class MainActivity : AppCompatActivity(), AssistsServiceListener {
     override fun onBackPressed() {
         super.onBackPressed()
         moveTaskToBack(true)
+    }
+
+    private fun updateControlStatus(status: ControlPanelBridge.ConnectionStatus) {
+        val tv = viewBind.tvControlStatus
+        when (status) {
+            ControlPanelBridge.ConnectionStatus.CONNECTED -> {
+                tv.text = "控制面板：已连接"
+            }
+            ControlPanelBridge.ConnectionStatus.CONNECTING -> {
+                tv.text = "控制面板：连接中..."
+            }
+            ControlPanelBridge.ConnectionStatus.DISCONNECTED -> {
+                tv.text = "控制面板：未连接"
+            }
+        }
     }
 }

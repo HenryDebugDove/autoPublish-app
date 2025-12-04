@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>微博发布管理后台</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>微博发布管理后台</h1>
+    <div id="connectionStatus" class="status status-disconnected">未连接</div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>连接状态</h2>
+      <p>手机端状态：<span id="statusText">未连接</span></p>
+      <p>最近心跳：<span id="heartbeatText">-</span></p>
+      <p>设备信息：<span id="deviceInfo">-</span></p>
+      <button id="refreshStatus">手动刷新</button>
+    </section>
+
+    <section class="card">
+      <h2>微博发布配置</h2>
+      <label for="tailTagInput">尾部标签（tailTag）</label>
+      <input id="tailTagInput" type="text" placeholder="#话题#" />
+
+      <label for="contentInput">要粘贴的文本</label>
+      <textarea id="contentInput" rows="6" placeholder="请输入微博正文（可含占位符）"></textarea>
+
+      <div class="actions">
+        <button id="saveConfig">保存配置</button>
+        <button id="publishBtn" class="primary">发布</button>
+      </div>
+      <p class="hint">保存配置仅更新后台数据，点击发布会把当前输入下发到手机端。</p>
+    </section>
+  </main>
+
+  <footer>
+    <small>前后端统一使用 Express + WebSocket · 当前时间：<span id="now"></span></small>
+  </footer>
+
+  <script src="main.js" type="module"></script>
+</body>
+</html>

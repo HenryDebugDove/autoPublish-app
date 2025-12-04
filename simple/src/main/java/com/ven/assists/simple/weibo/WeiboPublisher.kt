@@ -1,6 +1,9 @@
 package com.ven.assists.simple.weibo
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.ContentValues
+import android.content.Context
 import android.graphics.Path
 import android.net.Uri
 import android.os.Build
@@ -29,7 +32,10 @@ import com.ven.assists.window.AssistsWindowManager
 import com.ven.assists.window.AssistsWindowManager.nonTouchableByAll
 import com.ven.assists.window.AssistsWindowManager.touchableByAll
 import kotlinx.coroutines.delay
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.io.InputStream
 import java.text.SimpleDateFormat
@@ -57,6 +63,10 @@ object WeiboPublisher {
     private const val TEMP_SUB_DIR = "weibo_album_temp"
     private var lastCreatedAlbumName: String? = null
     private val savedImageUris = mutableListOf<Uri>()
+
+    // 控制面板配置接口
+    private const val CONTROL_PANEL_BASE_URL = "http://192.168.137.87:4001"
+    private val httpClient = OkHttpClient()
 
     data class Context(
         val log: (String) -> Unit,
@@ -94,7 +104,67 @@ object WeiboPublisher {
     private val WEIBO_IMAGE_URLS: List<String>
         get() = WEIBO_IMAGE_PATHS.map { "$IMAGE_BASE_URL/$it" }
 
+    data class RemoteConfig(
+        val remoteTailTag: String,
+        val contentTemplate: String
+    )
+
+    private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
+        return try {
+            val request = Request.Builder()
+                .url("$CONTROL_PANEL_BASE_URL/api/config")
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
+                    return null
+                }
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) {
+                    log("❌ 控制面板配置响应为空")
+                    return null
+                }
+                val json = JSONObject(body)
+                val remoteTail = json.optString("tailTag")
+                val content = json.optString("contentTemplate")
+                if (remoteTail.isBlank() || content.isBlank()) {
+                    log("⚠️ 控制面板返回的配置不完整")
+                } else {
+                    log("✅ 已从控制面板获取配置")
+                }
+                RemoteConfig(remoteTail, content)
+            }
+        } catch (e: Exception) {
+            log("❌ 拉取控制面板配置异常: ${e.message}")
+            null
+        }
+    }
+
+    private fun copyContentToClipboard(text: String, log: (String) -> Unit) {
+        val service = AssistsService.instance ?: run {
+            log("⚠️ AssistsService 未初始化，无法写入剪贴板")
+            return
+        }
+        val clipboard = service.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        if (clipboard == null) {
+            log("⚠️ 无法获取剪贴板服务")
+            return
+        }
+        clipboard.setPrimaryClip(ClipData.newPlainText("weibo_content", text))
+        log("✅ 已将控制面板配置的文本写入剪贴板")
+    }
+
     suspend fun publish(context: Context) = with(context) {
+        // 启动时优先从控制面板后端获取 tailTag 和要粘贴的文本
+        fetchRemoteConfig(log)?.let { cfg ->
+            if (cfg.remoteTailTag.isNotBlank()) {
+                tailTag = cfg.remoteTailTag
+                log("已从控制面板更新 tailTag：$tailTag")
+            }
+            if (cfg.contentTemplate.isNotBlank()) {
+                copyContentToClipboard(cfg.contentTemplate, log)
+            }
+        } ?: log("⚠️ 未能从控制面板获取配置，使用当前本地 tailTag 和剪贴板内容")
         if (!prepareWeiboAlbumImages(log)) {
             log("❌ 初始化微博素材图片失败")
             return
@@ -261,7 +331,7 @@ object WeiboPublisher {
         }
 
         log("步骤6: 查找并点击发送按钮")
-        delay(500)
+//        delay(500)
         log("等待3秒后再点击发送按钮...")
         delay(3000)
         if (clickSendButton()) {

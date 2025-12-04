@@ -1,0 +1,180 @@
+const path = require('path');
+const fs = require('fs');
+const http = require('http');
+const express = require('express');
+const cors = require('cors');
+const WebSocket = require('ws');
+
+const app = express();
+const PORT = process.env.PORT || 4001;
+const HEARTBEAT_TIMEOUT = 15000; // 15 seconds
+const ROOT_DIR = path.join(__dirname, '..');
+const PUBLIC_DIR = path.join(ROOT_DIR, 'public');
+const CONFIG_PATH = path.join(ROOT_DIR, 'data', 'config.json');
+
+app.use(cors());
+app.use(express.json({ limit: '1mb' }));
+app.use(
+  express.static(PUBLIC_DIR, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('.html')) {
+        res.set('Content-Type', 'text/html; charset=utf-8');
+      } else if (filePath.endsWith('.css')) {
+        res.set('Content-Type', 'text/css; charset=utf-8');
+      } else if (filePath.endsWith('.js')) {
+        res.set('Content-Type', 'application/javascript; charset=utf-8');
+      }
+    }
+  })
+);
+app.get('/', (_req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+});
+
+const status = {
+  lastHeartbeat: null,
+  isConnected: false,
+  deviceInfo: null
+};
+
+function readConfig() {
+  try {
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf-8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.error('Failed to read config file:', err.message);
+    return { tailTag: '', contentTemplate: '' };
+  }
+}
+
+function writeConfig(newConfig) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2), 'utf-8');
+}
+
+app.get('/api/status', (_req, res) => {
+  const now = Date.now();
+  const isAlive = status.lastHeartbeat && now - status.lastHeartbeat < HEARTBEAT_TIMEOUT;
+  res.json({
+    connected: Boolean(status.isConnected && isAlive),
+    lastHeartbeat: status.lastHeartbeat,
+    deviceInfo: status.deviceInfo
+  });
+});
+
+app.get('/api/config', (_req, res) => {
+  res.json(readConfig());
+});
+
+app.post('/api/config', (req, res) => {
+  const { tailTag, contentTemplate } = req.body || {};
+  if (typeof tailTag !== 'string' || typeof contentTemplate !== 'string') {
+    return res.status(400).json({ message: 'tailTag and contentTemplate are required.' });
+  }
+  const config = { tailTag, contentTemplate };
+  writeConfig(config);
+  res.json({ message: 'Configuration saved.', config });
+});
+
+app.post('/api/publish', (req, res) => {
+  const config = readConfig();
+  const payload = {
+    type: 'publish',
+    tailTag: config.tailTag,
+    content: req.body?.content ?? config.contentTemplate,
+    timestamp: Date.now()
+  };
+
+  if (!broadcastToClients(payload)) {
+    return res.status(503).json({ message: 'No connected devices were able to receive the publish command.' });
+  }
+
+  res.json({ message: 'Publish request broadcast to connected devices.', payload });
+});
+
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: '/ws' });
+const clients = new Set();
+
+wss.on('connection', (ws) => {
+  console.log('WebSocket client connected.');
+  clients.add(ws);
+  status.isConnected = true;
+  status.lastHeartbeat = Date.now();
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message.toString());
+      handleClientMessage(ws, data);
+    } catch (err) {
+      console.warn('Failed to parse incoming WebSocket payload:', err.message);
+    }
+  });
+
+  ws.on('close', () => {
+    clients.delete(ws);
+    evaluateConnectionState();
+  });
+
+  ws.on('error', (err) => {
+    console.error('WebSocket error:', err.message);
+  });
+});
+
+function handleClientMessage(ws, data) {
+  switch (data.type) {
+    case 'heartbeat':
+      ws.isAlive = true;
+      status.lastHeartbeat = Date.now();
+      status.deviceInfo = data.deviceInfo || null;
+      break;
+    case 'register':
+      status.deviceInfo = data.deviceInfo || null;
+      break;
+    case 'ack':
+      console.log('Publish acknowledgement:', data.message || 'No message');
+      break;
+    default:
+      console.log('Received unhandled message from client:', data);
+  }
+}
+
+function broadcastToClients(payload) {
+  let delivered = false;
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(payload));
+      delivered = true;
+    }
+  });
+  return delivered;
+}
+
+function evaluateConnectionState() {
+  if (!clients.size) {
+    status.isConnected = false;
+    status.deviceInfo = null;
+  }
+}
+
+setInterval(() => {
+  clients.forEach((client) => {
+    if (client.readyState !== WebSocket.OPEN) {
+      clients.delete(client);
+      return;
+    }
+    // 简化为仅依赖 ping/pong 与 lastHeartbeat，不再用 isAlive 标记强制断开
+    client.ping();
+  });
+
+  const now = Date.now();
+  if (!status.lastHeartbeat || now - status.lastHeartbeat > HEARTBEAT_TIMEOUT) {
+    status.isConnected = false;
+  } else {
+    status.isConnected = true;
+  }
+}, 5000);
+
+server.listen(PORT, () => {
+  console.log(`Control panel server listening at http://localhost:${PORT}`);
+});

@@ -123,6 +123,14 @@ object DouyinPublisher {
         log("⏳ 等待页面稳定，延时5秒...")
         delay(5000)
         
+        log("🚧 抖音自动化发布流程（阶段3.5：随机点击话题分类按钮）")
+        if (clickRandomTopicButton()) {
+            log("✅ 已随机点击话题分类按钮")
+        } else {
+            log("⚠️ 未能点击话题分类按钮，继续流程")
+        }
+        
+        delay(5000)
         log("🚧 抖音自动化发布流程（阶段四：点击第二个下一步）")
         if (clickNextButtonInFrame()) {
             log("✅ 已点击第二个下一步按钮")
@@ -524,6 +532,117 @@ object DouyinPublisher {
         }
         
         return null
+    }
+
+    /**
+     * 随机点击 RecyclerView 下的话题分类按钮
+     */
+    private suspend fun DouyinContext.clickRandomTopicButton(): Boolean {
+        val buttons = findTopicCategoryButtons()
+        if (buttons.isEmpty()) {
+            log("❌ 未找到话题分类按钮")
+            return false
+        }
+        
+        log("ℹ️ 找到 ${buttons.size} 个话题分类按钮")
+        
+        // 随机选择一个按钮
+        val randomButton = buttons.random()
+        val desc = randomButton.contentDescription?.toString() ?: "未知"
+        log("🎲 随机选中话题：$desc")
+        
+        showClickEffect(randomButton, "话题分类: $desc")
+        delay(200)
+        
+        repeat(3) { round ->
+            log("🔁 话题分类按钮点击重试: 第 ${round + 1} 轮")
+            randomButton.refresh()
+            
+            // 方式1: 直接点击 Button
+            if (randomButton.isClickable && randomButton.click()) {
+                log("✅ 方式1: 直接点击Button成功")
+                delay(200)
+                return true
+            }
+            
+            // 方式2: 点击可点击的父节点
+            randomButton.findFirstParentClickable()?.let { parent ->
+                log("尝试点击可点击的父节点: ${parent.className}")
+                delay(80)
+                if (parent.click()) {
+                    log("✅ 方式2: 通过点击父节点成功")
+                    delay(200)
+                    return true
+                }
+            }
+            
+            // 方式3: clickSelfOrParent
+            if (randomButton.clickSelfOrParent()) {
+                log("✅ 方式3: clickSelfOrParent 成功")
+                delay(200)
+                return true
+            }
+            
+            // 方式4: 手势点击
+            val bounds = randomButton.getBoundsInScreen()
+            val cx = bounds.centerX().toFloat()
+            val cy = bounds.centerY().toFloat()
+            showClickEffect(cx, cy, "手势点击话题按钮 (round ${round + 1})")
+            delay(80)
+            
+            if (AssistsCore.gestureClick(cx, cy, duration = 80)) {
+                log("✅ 方式4: 手势点击成功")
+                delay(200)
+                return true
+            }
+            
+            // 方式5: nodeGestureClick
+            if (randomButton.nodeGestureClick()) {
+                log("✅ 方式5: nodeGestureClick 成功")
+                delay(200)
+                return true
+            }
+            
+            delay(300)
+        }
+        
+        log("⚠️ 所有点击方式多轮重试后仍未触发")
+        return false
+    }
+    
+    /**
+     * 查找 RecyclerView 下的所有话题分类按钮(仅包含指定的话题类型)
+     */
+    private fun findTopicCategoryButtons(): List<AccessibilityNodeInfo> {
+        val buttons = mutableListOf<AccessibilityNodeInfo>()
+        
+        // 允许的话题类型列表
+        val allowedTopics = setOf(
+            "提问小卡",
+            "简约纸条",
+            "每日心情",
+            "彩色心情",
+            "暗调笔记",
+            "互动对话",
+            "灵感速记"
+        )
+        
+        // 查找 RecyclerView
+        AssistsCore.findByTags("androidx.recyclerview.widget.RecyclerView").forEach { recyclerView ->
+            // 查找 RecyclerView 下的所有 Button
+            recyclerView.findByTags("android.widget.Button").forEach { button ->
+                // 确保 Button 有 content-desc
+                val desc = button.contentDescription?.toString()
+                if (!desc.isNullOrEmpty()) {
+                    // 仅添加允许列表中的按钮
+                    if (desc in allowedTopics) {
+                        buttons.add(button)
+                    }
+                }
+            }
+        }
+        
+        return buttons
     }
 
     /**

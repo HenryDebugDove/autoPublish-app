@@ -3,43 +3,221 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>微博发布管理后台</title>
+  <title>社交媒体发布管理平台</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
-    <h1>微博发布管理后台</h1>
-    <div id="connectionStatus" class="status status-disconnected">未连接</div>
-  </header>
-
-  <main>
-    <section class="card">
-      <h2>连接状态</h2>
-      <p>手机端状态：<span id="statusText">未连接</span></p>
-      <p>最近心跳：<span id="heartbeatText">-</span></p>
-      <p>设备信息：<span id="deviceInfo">-</span></p>
-      <button id="refreshStatus">手动刷新</button>
-    </section>
-
-    <section class="card">
-      <h2>微博发布配置</h2>
-      <label for="tailTagInput">尾部标签（tailTag）</label>
-      <input id="tailTagInput" type="text" placeholder="#话题#" />
-
-      <label for="contentInput">要粘贴的文本</label>
-      <textarea id="contentInput" rows="6" placeholder="请输入微博正文（可含占位符）"></textarea>
-
-      <div class="actions">
-        <button id="saveConfig">保存配置</button>
-        <button id="publishBtn" class="primary">发布</button>
+  <div id="toast-root" class="toast-root"></div>
+  <div class="container">
+    <header class="header">
+      <div class="header-content">
+        <h1 class="title">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+          Social Media Publisher
+        </h1>
+        <div class="status-indicator">
+          <span class="status-dot" id="statusDot"></span>
+          <span class="status-text" id="connectionStatus">未连接</span>
+        </div>
       </div>
-      <p class="hint">保存配置仅更新后台数据，点击发布会把当前输入下发到手机端。</p>
-    </section>
-  </main>
+    </header>
 
-  <footer>
-    <small>前后端统一使用 Express + WebSocket · 当前时间：<span id="now"></span></small>
-  </footer>
+    <main class="main-content">
+      <!-- Device Status Card -->
+      <section class="card status-card">
+        <div class="card-header">
+          <h2 class="card-title">
+            <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+              <line x1="12" y1="18" x2="12.01" y2="18"></line>
+            </svg>
+            设备状态
+          </h2>
+          <button class="btn-refresh" id="refreshStatus">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            刷新
+          </button>
+        </div>
+        <div class="status-grid">
+          <div class="status-item">
+            <span class="label">连接状态</span>
+            <span class="value" id="statusText">未连接</span>
+          </div>
+          <div class="status-item">
+            <span class="label">最近心跳</span>
+            <span class="value" id="heartbeatText">-</span>
+          </div>
+          <div class="status-item full-width">
+            <span class="label">设备信息</span>
+            <span class="value" id="deviceInfo">-</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="weibo">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 3a10.9 10.9 0 0 1-3.14 1.53 4.48 4.48 0 0 0-7.86 3v1A10.66 10.66 0 0 1 3 4s-4 9 5 13a11.64 11.64 0 0 1-7 2c9 5 20 0 20-11.5a4.5 4.5 0 0 0-.08-.83A7.72 7.72 0 0 0 23 3z"></path>
+          </svg>
+          微博发布
+        </button>
+        <button class="tab-btn" data-tab="douyin">
+          <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+            <polyline points="2 17 12 22 22 17"></polyline>
+            <polyline points="2 12 12 17 22 12"></polyline>
+          </svg>
+          抖音发布
+        </button>
+      </div>
+
+      <!-- Weibo Tab Content -->
+      <section class="tab-content active" id="weibo-content">
+        <div class="card publish-card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+              微博配置
+            </h2>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="tailTagInput">
+              <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+              </svg>
+              尾部标签
+            </label>
+            <input class="form-input" id="tailTagInput" type="text" placeholder="#话题标签 #程序员" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="contentInput">
+              <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              文案内容
+            </label>
+            <textarea class="form-textarea" id="contentInput" rows="8" placeholder="请输入微博文案内容..."></textarea>
+          </div>
+          <div class="button-group">
+            <button class="btn btn-secondary" id="saveConfig">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              保存配置
+            </button>
+            <button class="btn btn-primary" id="publishBtn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+              立即发布
+            </button>
+          </div>
+          <p class="hint">
+            <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            保存配置后，点击发布将内容推送至手机端
+          </p>
+        </div>
+      </section>
+
+      <!-- Douyin Tab Content -->
+      <section class="tab-content" id="douyin-content">
+        <div class="card publish-card">
+          <div class="card-header">
+            <h2 class="card-title">
+              <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 20h9"></path>
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+              </svg>
+              抖音配置
+            </h2>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="douyinTailTagInput">
+              <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+              </svg>
+              话题标签
+            </label>
+            <input class="form-input" id="douyinTailTagInput" type="text" placeholder="#前端 #程序员" />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="douyinContentInput">
+              <svg class="label-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              文案内容
+            </label>
+            <textarea class="form-textarea" id="douyinContentInput" rows="8" placeholder="请输入抖音文案内容..."></textarea>
+          </div>
+          <div class="button-group">
+            <button class="btn btn-secondary" id="saveConfigDouyin">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                <polyline points="7 3 7 8 15 8"></polyline>
+              </svg>
+              保存配置
+            </button>
+            <button class="btn btn-primary" id="publishBtnDouyin">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+              立即发布
+            </button>
+          </div>
+          <p class="hint">
+            <svg class="hint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="16" x2="12" y2="12"></line>
+              <line x1="12" y1="8" x2="12.01" y2="8"></line>
+            </svg>
+            保存配置后，点击发布将内容推送至手机端
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-content">
+        <span class="footer-text">
+          <svg class="footer-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <span id="now"></span>
+        </span>
+        <span class="footer-badge">Powered by Express + WebSocket</span>
+      </div>
+    </footer>
+  </div>
 
   <script src="main.js" type="module"></script>
 </body>

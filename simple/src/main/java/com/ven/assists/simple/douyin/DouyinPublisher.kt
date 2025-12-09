@@ -22,8 +22,12 @@ typealias DouyinContext = WeiboPublisher.Context
  * 抖音自动化发布流程（预留架子，后续逐步补全）
  */
 object DouyinPublisher {
-    // 先写死的文案，后续可改为控制面板下发
-    private const val DOUYIN_CONTENT_TEMPLATE = "零基础学前端怕坚持不下来、被拖延症耽误？9年前端带徒，我来监督！从HTML、CSS入门，逐步攻克JS、Vue、React，最后练小程序/Uniapp项目。每完成小目标立即复盘，正向反馈看得见进步。日常督促打卡，瓶颈期调整心态，想有人盯着学，跟我一起搞定前端！"
+    /**
+     * 抖音文案模板，可在外部进行配置
+     */
+    var contentTemplate: String = "零基础学前端怕坚持不下来、被拖延症耳误？9年前端带徒，我来监督！从 HTML、CSS入门，逐步攻克 JS、Vue、React，最后练小程序/Uniapp项目。每完成小目标立即复盘，正向反馈看得见进步。日常督促打卡，瓶颈期调整心态，想有人盯着学，跟我一起搞定前端！"
+        @Synchronized get
+        @Synchronized set
     
     /**
      * 抖音话题标签，可在外部进行配置
@@ -32,7 +36,58 @@ object DouyinPublisher {
         @Synchronized get
         @Synchronized set
 
+    // 控制面板配置接口
+    private const val CONTROL_PANEL_BASE_URL = "http://192.168.50.192:4001"
+    private val httpClient = okhttp3.OkHttpClient()
+
+    data class RemoteConfig(
+        val weiboTailTag: String,
+        val weiboContentTemplate: String,
+        val douyinTailTag: String,
+        val douyinContentTemplate: String
+    )
+
+    private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
+        return try {
+            val request = okhttp3.Request.Builder()
+                .url("$CONTROL_PANEL_BASE_URL/api/config")
+                .build()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
+                    return null
+                }
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) {
+                    log("❌ 控制面板配置响应为空")
+                    return null
+                }
+                val json = org.json.JSONObject(body)
+                val weiboTail = json.optString("tailTag", "")
+                val weiboContent = json.optString("contentTemplate", "")
+                val douyinTail = json.optString("douyinTailTag", "")
+                val douyinContent = json.optString("douyinContentTemplate", "")
+                log("✅ 已从控制面板获取配置")
+                RemoteConfig(weiboTail, weiboContent, douyinTail, douyinContent)
+            }
+        } catch (e: Exception) {
+            log("❌ 拉取控制面板配置异常: ${e.message}")
+            null
+        }
+    }
+
     suspend fun publish(context: DouyinContext) = with(context) {
+        // 启动时优先从控制面板后端获取 tailTag 和 contentTemplate
+        fetchRemoteConfig(log)?.let { cfg ->
+            if (cfg.douyinTailTag.isNotBlank()) {
+                tailTag = cfg.douyinTailTag
+                log("已从控制面板更新抖音 tailTag：$tailTag")
+            }
+            if (cfg.douyinContentTemplate.isNotBlank()) {
+                contentTemplate = cfg.douyinContentTemplate
+                log("已从控制面板更新抖音 contentTemplate")
+            }
+        } ?: log("⚠️ 未能从控制面板获取抖音配置，使用当前本地配置")
         log("🚧 抖音自动化发布流程（阶段一：点击底部+号）")
         if (clickBottomAddButton()) {
             log("✅ 已点击底部加号按钮")
@@ -147,7 +202,7 @@ object DouyinPublisher {
         AssistsCore.gestureClick(cx, cy)
         delay(200)
 
-        val target = DOUYIN_CONTENT_TEMPLATE
+        val target = contentTemplate
 
         // 方案1：setNodeText
         if (edit.refresh() && edit.setNodeText(target)) {
@@ -626,7 +681,7 @@ object DouyinPublisher {
         log("粘贴前输入框文本长度: $beforeLength")
 
         // 拼接完整内容：文案 + 空格 + 标签
-        val fullContent = "$DOUYIN_CONTENT_TEMPLATE $tailTag"
+        val fullContent = "$contentTemplate $tailTag"
         log("准备填充完整内容: $fullContent")
 
         log("步骤3: 执行粘贴操作")
@@ -701,7 +756,7 @@ object DouyinPublisher {
             val afterLength = afterText.length
             log("粘贴后输入框文本长度: $afterLength")
             log("粘贴后输入框内容: ${afterText.take(100)}...")
-            if (afterLength > beforeLength || afterText.contains(DOUYIN_CONTENT_TEMPLATE) || afterText.contains(tailTag)) {
+            if (afterLength > beforeLength || afterText.contains(contentTemplate) || afterText.contains(tailTag)) {
                 log("✅ 话题标签添加成功")
                 return true
             }

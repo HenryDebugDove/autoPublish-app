@@ -44,7 +44,12 @@ function readConfig() {
     return JSON.parse(raw);
   } catch (err) {
     console.error('Failed to read config file:', err.message);
-    return { tailTag: '', contentTemplate: '' };
+    return { 
+      tailTag: '', 
+      contentTemplate: '',
+      douyinTailTag: '',
+      douyinContentTemplate: ''
+    };
   }
 }
 
@@ -67,29 +72,51 @@ app.get('/api/config', (_req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { tailTag, contentTemplate } = req.body || {};
+  const { tailTag, contentTemplate, douyinTailTag, douyinContentTemplate } = req.body || {};
   if (typeof tailTag !== 'string' || typeof contentTemplate !== 'string') {
     return res.status(400).json({ message: 'tailTag and contentTemplate are required.' });
   }
-  const config = { tailTag, contentTemplate };
+  const config = { 
+    tailTag, 
+    contentTemplate,
+    douyinTailTag: douyinTailTag || '',
+    douyinContentTemplate: douyinContentTemplate || ''
+  };
   writeConfig(config);
   res.json({ message: 'Configuration saved.', config });
 });
 
 app.post('/api/publish', (req, res) => {
   const config = readConfig();
-  const payload = {
-    type: 'publish',
-    tailTag: config.tailTag,
-    content: req.body?.content ?? config.contentTemplate,
-    timestamp: Date.now()
-  };
+  const platform = req.body?.platform || 'weibo'; // 默认微博
+  
+  let payload;
+  if (platform === 'douyin') {
+    // 抖音发布
+    payload = {
+      type: 'publish_douyin',
+      douyinTailTag: config.douyinTailTag,
+      douyinContentTemplate: req.body?.content ?? config.douyinContentTemplate,
+      timestamp: Date.now()
+    };
+  } else {
+    // 微博发布（默认）
+    payload = {
+      type: 'publish',
+      tailTag: config.tailTag,
+      content: req.body?.content ?? config.contentTemplate,
+      timestamp: Date.now()
+    };
+  }
 
   if (!broadcastToClients(payload)) {
     return res.status(503).json({ message: 'No connected devices were able to receive the publish command.' });
   }
 
-  res.json({ message: 'Publish request broadcast to connected devices.', payload });
+  res.json({ 
+    message: `${platform === 'douyin' ? '抖音' : '微博'}发布请求已广播到连接的设备`, 
+    payload 
+  });
 });
 
 const server = http.createServer(app);

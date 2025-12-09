@@ -1,3 +1,4 @@
+const statusDot = document.getElementById('statusDot');
 const statusBadge = document.getElementById('connectionStatus');
 const statusText = document.getElementById('statusText');
 const heartbeatText = document.getElementById('heartbeatText');
@@ -5,10 +6,77 @@ const deviceInfo = document.getElementById('deviceInfo');
 const nowEl = document.getElementById('now');
 const tailTagInput = document.getElementById('tailTagInput');
 const contentInput = document.getElementById('contentInput');
+const douyinTailTagInput = document.getElementById('douyinTailTagInput');
+const douyinContentInput = document.getElementById('douyinContentInput');
+const toastRoot = document.getElementById('toast-root');
 
 const refreshBtn = document.getElementById('refreshStatus');
 const saveConfigBtn = document.getElementById('saveConfig');
 const publishBtn = document.getElementById('publishBtn');
+const saveConfigBtnDouyin = document.getElementById('saveConfigDouyin');
+const publishBtnDouyin = document.getElementById('publishBtnDouyin');
+
+// Tab switching
+const tabButtons = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+let currentPlatform = 'weibo'; // 默认是微博
+
+tabButtons.forEach(btn => {
+  btn.addEventListener('click', () => {
+    const targetTab = btn.dataset.tab;
+    
+    // Remove active class from all tabs and contents
+    tabButtons.forEach(b => b.classList.remove('active'));
+    tabContents.forEach(c => c.classList.remove('active'));
+    
+    // Add active class to clicked tab and corresponding content
+    btn.classList.add('active');
+    document.getElementById(`${targetTab}-content`).classList.add('active');
+    
+    // 更新当前平台
+    currentPlatform = targetTab;
+    console.log('当前选中平台:', currentPlatform);
+  });
+});
+
+function showToast(message, type = 'info') {
+  console.log('showToast called:', message, type, 'toastRoot:', toastRoot);
+  if (!toastRoot) {
+    console.error('toast-root element not found!');
+    return;
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast--${type}`;
+  el.innerHTML = `
+    <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      ${type === 'success'
+        ? '<polyline points="20 6 9 17 4 12"></polyline>'
+        : type === 'error'
+        ? '<circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line>'
+        : '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>'}
+    </svg>
+    <div class="toast-message">${message}</div>
+    <button class="toast-close" aria-label="关闭">
+      &times;
+    </button>
+  `;
+
+  const close = () => {
+    if (!el.parentNode) return;
+    el.style.opacity = '0';
+    el.style.transform = 'translateX(20px)';
+    setTimeout(() => {
+      if (el.parentNode) {
+        el.parentNode.removeChild(el);
+      }
+    }, 200);
+  };
+
+  el.querySelector('.toast-close')?.addEventListener('click', close);
+  toastRoot.appendChild(el);
+  console.log('Toast appended to DOM:', el);
+  setTimeout(close, 3500);
+}
 
 function formatTime(timestamp) {
   if (!timestamp) return '-';
@@ -16,9 +84,11 @@ function formatTime(timestamp) {
   return date.toLocaleString();
 }
 
+
 function setStatusUI(connected) {
-  statusBadge.classList.toggle('status-connected', connected);
-  statusBadge.classList.toggle('status-disconnected', !connected);
+  if (statusDot) {
+    statusDot.classList.toggle('connected', connected);
+  }
   statusBadge.textContent = connected ? '已连接' : '未连接';
   statusText.textContent = connected ? '已连接' : '未连接';
 }
@@ -44,15 +114,20 @@ async function loadConfig() {
     const data = await res.json();
     tailTagInput.value = data.tailTag || '';
     contentInput.value = data.contentTemplate || '';
+    douyinTailTagInput.value = data.douyinTailTag || '';
+    douyinContentInput.value = data.douyinContentTemplate || '';
   } catch (err) {
     console.error('加载配置失败', err);
+    showToast('加载配置失败', 'error');
   }
 }
 
 async function saveConfig() {
   const body = {
     tailTag: tailTagInput.value.trim(),
-    contentTemplate: contentInput.value
+    contentTemplate: contentInput.value,
+    douyinTailTag: douyinTailTagInput.value.trim(),
+    douyinContentTemplate: douyinContentInput.value
   };
   try {
     const res = await fetch('/api/config', {
@@ -61,32 +136,49 @@ async function saveConfig() {
       body: JSON.stringify(body)
     });
     const data = await res.json();
-    alert(data.message || '配置已保存');
+    showToast(data.message || '配置已保存', 'success');
   } catch (err) {
-    alert('保存失败: ' + err.message);
+    showToast('保存失败: ' + err.message, 'error');
   }
 }
 
 async function publish() {
   try {
+    const platform = currentPlatform; // 'weibo' 或 'douyin'
+    const content = platform === 'weibo' ? contentInput.value : douyinContentInput.value;
+    
+    console.log('发布平台:', platform);
+    console.log('发布内容:', content);
+    
     const res = await fetch('/api/publish', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: contentInput.value })
+      body: JSON.stringify({ 
+        platform: platform,
+        content: content 
+      })
     });
     const data = await res.json();
     if (!res.ok) {
       throw new Error(data.message || '发布失败');
     }
-    alert('发布指令已发送');
+    showToast(`${platform === 'weibo' ? '微博' : '抖音'}发布指令已发送`, 'success');
   } catch (err) {
-    alert(err.message);
+    showToast(err.message, 'error');
   }
 }
 
 saveConfigBtn.addEventListener('click', saveConfig);
 publishBtn.addEventListener('click', publish);
 refreshBtn.addEventListener('click', fetchStatus);
+
+// Douyin buttons use same save/publish functions
+if (saveConfigBtnDouyin) {
+  saveConfigBtnDouyin.addEventListener('click', saveConfig);
+}
+if (publishBtnDouyin) {
+  publishBtnDouyin.addEventListener('click', publish);
+}
 
 setInterval(() => {
   nowEl.textContent = new Date().toLocaleString();

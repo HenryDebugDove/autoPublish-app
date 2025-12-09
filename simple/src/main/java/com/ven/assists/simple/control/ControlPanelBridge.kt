@@ -9,6 +9,7 @@ import com.blankj.utilcode.util.ToastUtils
 import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.overlays.OverlayBasic
 import com.ven.assists.simple.weibo.WeiboPublisher
+import com.ven.assists.simple.douyin.DouyinPublisher
 import com.ven.assists.utils.CoroutineWrapper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -27,8 +28,8 @@ import java.util.concurrent.TimeUnit
  */
 object ControlPanelBridge {
     private const val TAG = "ControlPanelBridge"
-    private const val SERVER_BASE_URL = "http://192.168.137.87:4001/"
-    private const val WS_URL = "ws://192.168.137.87:4001/ws"
+    private const val SERVER_BASE_URL = "http://192.168.50.192:4001/"
+    private const val WS_URL = "ws://192.168.50.192:4001/ws"
     private const val HEARTBEAT_INTERVAL = 10_000L
 
     private val okHttpClient = OkHttpClient.Builder()
@@ -178,6 +179,7 @@ object ControlPanelBridge {
             val data = JSONObject(text)
             when (data.optString("type")) {
                 "publish" -> handlePublishCommand(data)
+                "publish_douyin" -> handleDouyinPublishCommand(data)
                 "config" -> applyConfigFromServer(data)
                 else -> Log.d(TAG, "未知消息: $text")
             }
@@ -200,6 +202,25 @@ object ControlPanelBridge {
             runCatching {
                 WeiboPublisher.publish(OverlayBasic.createWeiboAutomationContext())
             }.onFailure { Log.e(TAG, "执行微博发布失败: ${it.message}") }
+        }
+    }
+
+    private fun handleDouyinPublishCommand(json: JSONObject) {
+        val douyinTailTag = json.optString("douyinTailTag")
+        val douyinContentTemplate = json.optString("douyinContentTemplate")
+        if (douyinTailTag.isNotBlank()) {
+            DouyinPublisher.tailTag = douyinTailTag
+            Log.d(TAG, "已更新抖音 tailTag: $douyinTailTag")
+        }
+        if (douyinContentTemplate.isNotBlank()) {
+            DouyinPublisher.contentTemplate = douyinContentTemplate
+            Log.d(TAG, "已更新抖音 contentTemplate")
+        }
+        sendAck("publish_douyin_received")
+        CoroutineWrapper.launch(isMain = true) {
+            runCatching {
+                DouyinPublisher.publish(OverlayBasic.createWeiboAutomationContext())
+            }.onFailure { Log.e(TAG, "执行抖音发布失败: ${it.message}") }
         }
     }
 

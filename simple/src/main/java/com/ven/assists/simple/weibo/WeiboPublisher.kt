@@ -65,7 +65,7 @@ object WeiboPublisher {
     private val savedImageUris = mutableListOf<Uri>()
 
     // 控制面板配置接口
-    private const val CONTROL_PANEL_BASE_URL = "http://192.168.137.87:4001"
+    private const val CONTROL_PANEL_BASE_URL = "http://192.168.50.192:4001"
     private val httpClient = OkHttpClient()
 
     data class Context(

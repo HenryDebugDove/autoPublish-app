@@ -1,6 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const os = require('os');
 const express = require('express');
 const cors = require('cors');
 const WebSocket = require('ws');
@@ -204,4 +205,23 @@ setInterval(() => {
 
 server.listen(PORT, () => {
   console.log(`Control panel server listening at http://localhost:${PORT}`);
+  
+  // 获取本地 IPv4 地址
+  const networkInterfaces = os.networkInterfaces();
+  const ipv4Addresses = [];
+  
+  Object.keys(networkInterfaces).forEach((interfaceName) => {
+    networkInterfaces[interfaceName].forEach((iface) => {
+      // 只获取 IPv4 且非内部地址
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ipv4Addresses.push(iface.address);
+      }
+    });
+  });
+  
+  if (ipv4Addresses.length > 0) {
+    ipv4Addresses.forEach((ip) => {
+      console.log(`                                http://${ip}:${PORT}/`);
+    });
+  }
 });

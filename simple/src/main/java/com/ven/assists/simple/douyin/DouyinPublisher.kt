@@ -25,7 +25,7 @@ object DouyinPublisher {
     /**
      * 抖音文案模板，可在外部进行配置
      */
-    var contentTemplate: String = "零基础学前端怕坚持不下来、被拖延症耳误？9年前端带徒，我来监督！从 HTML、CSS入门，逐步攻克 JS、Vue、React，最后练小程序/Uniapp项目。每完成小目标立即复盘，正向反馈看得见进步。日常督促打卡，瓶颈期调整心态，想有人盯着学，跟我一起搞定前端！"
+    var contentTemplate: String = "零基础学前端怕坚持不下来、被拖延症耳误？9年前端带徒，我来监督！从 HTML、CSS入门，逐步攻克 JS、Vue、React，最后练小程序/Uniapp项目。正向反馈看得见进步。日常督促打卡，想有人盯着学，跟我一起搞定前端！#前端 #程序员"
         @Synchronized get
         @Synchronized set
     

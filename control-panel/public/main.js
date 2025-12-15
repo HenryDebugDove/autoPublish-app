@@ -8,6 +8,8 @@ const tailTagInput = document.getElementById('tailTagInput');
 const contentInput = document.getElementById('contentInput');
 const douyinTailTagInput = document.getElementById('douyinTailTagInput');
 const douyinContentInput = document.getElementById('douyinContentInput');
+
+const kuaishouContentInput = document.getElementById('kuaishouContentInput');
 const toastRoot = document.getElementById('toast-root');
 
 const refreshBtn = document.getElementById('refreshStatus');
@@ -15,6 +17,8 @@ const saveConfigBtn = document.getElementById('saveConfig');
 const publishBtn = document.getElementById('publishBtn');
 const saveConfigBtnDouyin = document.getElementById('saveConfigDouyin');
 const publishBtnDouyin = document.getElementById('publishBtnDouyin');
+const saveConfigBtnKuaishou = document.getElementById('saveConfigKuaishou');
+const publishBtnKuaishou = document.getElementById('publishBtnKuaishou');
 
 // Tab switching
 const tabButtons = document.querySelectorAll('.tab-btn');
@@ -116,6 +120,7 @@ async function loadConfig() {
     contentInput.value = data.contentTemplate || '';
     douyinTailTagInput.value = data.douyinTailTag || '';
     douyinContentInput.value = data.douyinContentTemplate || '';
+    kuaishouContentInput.value = data.kuaishouContentTemplate || '';
   } catch (err) {
     console.error('加载配置失败', err);
     showToast('加载配置失败', 'error');
@@ -127,7 +132,8 @@ async function saveConfig() {
     tailTag: tailTagInput.value.trim(),
     contentTemplate: contentInput.value,
     douyinTailTag: douyinTailTagInput.value.trim(),
-    douyinContentTemplate: douyinContentInput.value
+    douyinContentTemplate: douyinContentInput.value,
+    kuaishouContentTemplate: kuaishouContentInput.value
   };
   try {
     const res = await fetch('/api/config', {
@@ -144,8 +150,10 @@ async function saveConfig() {
 
 async function publish() {
   try {
-    const platform = currentPlatform; // 'weibo' 或 'douyin'
-    const content = platform === 'weibo' ? contentInput.value : douyinContentInput.value;
+    const platform = currentPlatform; // 'weibo' 或 'douyin' 或 'kuaishou'
+    const content = platform === 'weibo' ? contentInput.value : 
+                    platform === 'douyin' ? douyinContentInput.value : 
+                    kuaishouContentInput.value;
     
     console.log('发布平台:', platform);
     console.log('发布内容:', content);
@@ -162,7 +170,7 @@ async function publish() {
     if (!res.ok) {
       throw new Error(data.message || '发布失败');
     }
-    showToast(`${platform === 'weibo' ? '微博' : '抖音'}发布指令已发送`, 'success');
+    showToast(`${platform === 'weibo' ? '微博' : platform === 'douyin' ? '抖音' : '快手'}发布指令已发送`, 'success');
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -178,6 +186,14 @@ if (saveConfigBtnDouyin) {
 }
 if (publishBtnDouyin) {
   publishBtnDouyin.addEventListener('click', publish);
+}
+
+// Kuaishou buttons use same save/publish functions
+if (saveConfigBtnKuaishou) {
+  saveConfigBtnKuaishou.addEventListener('click', saveConfig);
+}
+if (publishBtnKuaishou) {
+  publishBtnKuaishou.addEventListener('click', publish);
 }
 
 setInterval(() => {

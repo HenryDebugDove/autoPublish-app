@@ -49,7 +49,8 @@ function readConfig() {
       tailTag: '', 
       contentTemplate: '',
       douyinTailTag: '',
-      douyinContentTemplate: ''
+      douyinContentTemplate: '',
+      kuaishouContentTemplate: ''
     };
   }
 }
@@ -73,7 +74,7 @@ app.get('/api/config', (_req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { tailTag, contentTemplate, douyinTailTag, douyinContentTemplate } = req.body || {};
+  const { tailTag, contentTemplate, douyinTailTag, douyinContentTemplate, kuaishouContentTemplate } = req.body || {};
   if (typeof tailTag !== 'string' || typeof contentTemplate !== 'string') {
     return res.status(400).json({ message: 'tailTag and contentTemplate are required.' });
   }
@@ -81,7 +82,8 @@ app.post('/api/config', (req, res) => {
     tailTag, 
     contentTemplate,
     douyinTailTag: douyinTailTag || '',
-    douyinContentTemplate: douyinContentTemplate || ''
+    douyinContentTemplate: douyinContentTemplate || '',
+    kuaishouContentTemplate: kuaishouContentTemplate || ''
   };
   writeConfig(config);
   res.json({ message: 'Configuration saved.', config });
@@ -100,6 +102,13 @@ app.post('/api/publish', (req, res) => {
       douyinContentTemplate: req.body?.content ?? config.douyinContentTemplate,
       timestamp: Date.now()
     };
+  } else if (platform === 'kuaishou') {
+    // 快手发布
+    payload = {
+      type: 'publish_kuaishou',
+      kuaishouContentTemplate: req.body?.content ?? config.kuaishouContentTemplate,
+      timestamp: Date.now()
+    };
   } else {
     // 微博发布（默认）
     payload = {
@@ -115,7 +124,7 @@ app.post('/api/publish', (req, res) => {
   }
 
   res.json({ 
-    message: `${platform === 'douyin' ? '抖音' : '微博'}发布请求已广播到连接的设备`, 
+    message: `${platform === 'douyin' ? '抖音' : platform === 'kuaishou' ? '快手' : '微博'}发布请求已广播到连接的设备`, 
     payload 
   });
 });

@@ -12,6 +12,7 @@ import com.blankj.utilcode.util.SizeUtils
 import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.databinding.FloatingQuickBallBinding
 import com.ven.assists.simple.douyin.DouyinPublisher
+import com.ven.assists.simple.kuaishou.KuaishouPublisher
 import com.ven.assists.simple.overlays.OverlayBasic
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.utils.CoroutineWrapper
@@ -46,6 +47,13 @@ object FloatingQuickBallController {
                 toggleMenu(false)
                 CoroutineWrapper.launch(isMain = true) {
                     DouyinPublisher.publish(OverlayBasic.createWeiboAutomationContext())
+                }
+            }
+
+            btnKuaishouQuick.setOnClickListener {
+                toggleMenu(false)
+                CoroutineWrapper.launch(isMain = true) {
+                    KuaishouPublisher.publish(OverlayBasic.createWeiboAutomationContext())
                 }
             }
         }

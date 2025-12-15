@@ -10,6 +10,7 @@ import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.overlays.OverlayBasic
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.simple.douyin.DouyinPublisher
+import com.ven.assists.simple.kuaishou.KuaishouPublisher
 import com.ven.assists.utils.CoroutineWrapper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -180,6 +181,7 @@ object ControlPanelBridge {
             when (data.optString("type")) {
                 "publish" -> handlePublishCommand(data)
                 "publish_douyin" -> handleDouyinPublishCommand(data)
+                "publish_kuaishou" -> handleKuaishouPublishCommand(data)
                 "config" -> applyConfigFromServer(data)
                 else -> Log.d(TAG, "未知消息: $text")
             }
@@ -221,6 +223,20 @@ object ControlPanelBridge {
             runCatching {
                 DouyinPublisher.publish(OverlayBasic.createWeiboAutomationContext())
             }.onFailure { Log.e(TAG, "执行抖音发布失败: ${it.message}") }
+        }
+    }
+
+    private fun handleKuaishouPublishCommand(json: JSONObject) {
+        val kuaishouContentTemplate = json.optString("kuaishouContentTemplate")
+        if (kuaishouContentTemplate.isNotBlank()) {
+            KuaishouPublisher.contentTemplate = kuaishouContentTemplate
+            Log.d(TAG, "已更新快手 contentTemplate")
+        }
+        sendAck("publish_kuaishou_received")
+        CoroutineWrapper.launch(isMain = true) {
+            runCatching {
+                KuaishouPublisher.publish(OverlayBasic.createWeiboAutomationContext())
+            }.onFailure { Log.e(TAG, "执行快手发布失败: ${it.message}") }
         }
     }
 

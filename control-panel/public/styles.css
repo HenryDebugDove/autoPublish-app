@@ -92,6 +92,67 @@ body {
   border: 1px solid var(--color-border);
 }
 
+.status-indicator-compact {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+}
+
+.status-indicator-compact .status-divider {
+  color: var(--color-border);
+  font-weight: 300;
+}
+
+.status-indicator-compact .device-label {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+}
+
+.status-indicator-compact .device-value {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--color-text);
+  max-width: 200px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btn-refresh-mini {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+  margin-left: 0.25rem;
+}
+
+.btn-refresh-mini:hover {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.btn-refresh-mini svg {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-refresh-mini:active svg {
+  animation: spin 0.5s linear;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

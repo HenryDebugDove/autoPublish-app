@@ -1,7 +1,5 @@
 const statusDot = document.getElementById('statusDot');
 const statusBadge = document.getElementById('connectionStatus');
-const statusText = document.getElementById('statusText');
-const heartbeatText = document.getElementById('heartbeatText');
 const deviceInfo = document.getElementById('deviceInfo');
 const nowEl = document.getElementById('now');
 const tailTagInput = document.getElementById('tailTagInput');
@@ -101,8 +99,17 @@ function setStatusUI(connected) {
   if (statusDot) {
     statusDot.classList.toggle('connected', connected);
   }
-  statusBadge.textContent = connected ? '已连接' : '未连接';
-  statusText.textContent = connected ? '已连接' : '未连接';
+  if (statusBadge) {
+    statusBadge.textContent = connected ? '已连接' : '未连接';
+  }
+}
+
+// 格式化设备信息，只显示型号
+function formatDeviceInfo(info) {
+  if (!info) return '-';
+  if (typeof info === 'string') return info;
+  // 优先显示 model，否则显示 brand
+  return info.model || info.brand || info.device || '-';
 }
 
 async function fetchStatus() {
@@ -111,12 +118,15 @@ async function fetchStatus() {
     const data = await res.json();
     const connected = Boolean(data.connected);
     setStatusUI(connected);
-    heartbeatText.textContent = formatTime(data.lastHeartbeat);
-    deviceInfo.textContent = data.deviceInfo ? JSON.stringify(data.deviceInfo) : '-';
+    if (deviceInfo) {
+      deviceInfo.textContent = formatDeviceInfo(data.deviceInfo);
+    }
   } catch (err) {
     console.error(err);
     setStatusUI(false);
-    heartbeatText.textContent = '-';
+    if (deviceInfo) {
+      deviceInfo.textContent = '-';
+    }
   }
 }
 

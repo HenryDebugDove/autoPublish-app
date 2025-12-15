@@ -11,54 +11,30 @@
   <div class="container">
     <header class="header">
       <div class="header-content">
-        <h1 class="title">
+        <!-- <h1 class="title">
           <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
           </svg>
           Social Media Publisher
-        </h1>
-        <div class="status-indicator">
+        </h1> -->
+        <div class="status-indicator-compact">
           <span class="status-dot" id="statusDot"></span>
           <span class="status-text" id="connectionStatus">未连接</span>
-        </div>
-      </div>
-    </header>
-
-    <main class="main-content">
-      <!-- Device Status Card -->
-      <section class="card status-card">
-        <div class="card-header">
-          <h2 class="card-title">
-            <svg class="card-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-              <line x1="12" y1="18" x2="12.01" y2="18"></line>
-            </svg>
-            设备状态
-          </h2>
-          <button class="btn-refresh" id="refreshStatus">
+          <span class="status-divider">|</span>
+          <span class="device-label">设备:</span>
+          <span class="device-value" id="deviceInfo">-</span>
+          <button class="btn-refresh-mini" id="refreshStatus">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="23 4 23 10 17 10"></polyline>
               <polyline points="1 20 1 14 7 14"></polyline>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
             </svg>
-            刷新
           </button>
         </div>
-        <div class="status-grid">
-          <div class="status-item">
-            <span class="label">连接状态</span>
-            <span class="value" id="statusText">未连接</span>
-          </div>
-          <div class="status-item">
-            <span class="label">最近心跳</span>
-            <span class="value" id="heartbeatText">-</span>
-          </div>
-          <div class="status-item full-width">
-            <span class="label">设备信息</span>
-            <span class="value" id="deviceInfo">-</span>
-          </div>
-        </div>
-      </section>
+      </div>
+    </header>
+
+    <main class="main-content">
 
       <!-- Tabs -->
       <div class="tabs">

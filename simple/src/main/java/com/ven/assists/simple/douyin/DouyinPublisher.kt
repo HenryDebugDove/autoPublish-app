@@ -11,6 +11,7 @@ import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.simple.weibo.WeiboPublisher
+import com.ven.assists.simple.config.ServerConfig
 import kotlinx.coroutines.delay
 
 /**
@@ -36,8 +37,6 @@ object DouyinPublisher {
         @Synchronized get
         @Synchronized set
 
-    // 控制面板配置接口
-    private const val CONTROL_PANEL_BASE_URL = "http://192.168.50.192:4001"
     private val httpClient = okhttp3.OkHttpClient()
 
     data class RemoteConfig(
@@ -50,7 +49,7 @@ object DouyinPublisher {
     private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
             val request = okhttp3.Request.Builder()
-                .url("$CONTROL_PANEL_BASE_URL/api/config")
+                .url("${ServerConfig.SERVER_BASE_URL}/api/config")
                 .build()
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

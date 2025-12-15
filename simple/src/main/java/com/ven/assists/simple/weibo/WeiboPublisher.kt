@@ -26,6 +26,7 @@ import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.service.AssistsService
+import com.ven.assists.simple.config.ServerConfig
 import com.ven.assists.utils.FileDownloadUtil
 import com.ven.assists.utils.FileDownloadUtil.DownloadResult
 import com.ven.assists.window.AssistsWindowManager
@@ -64,8 +65,6 @@ object WeiboPublisher {
     private var lastCreatedAlbumName: String? = null
     private val savedImageUris = mutableListOf<Uri>()
 
-    // 控制面板配置接口
-    private const val CONTROL_PANEL_BASE_URL = "http://192.168.50.192:4001"
     private val httpClient = OkHttpClient()
 
     data class Context(
@@ -112,7 +111,7 @@ object WeiboPublisher {
     private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
             val request = Request.Builder()
-                .url("$CONTROL_PANEL_BASE_URL/api/config")
+                .url("${ServerConfig.SERVER_BASE_URL}/api/config")
                 .build()
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

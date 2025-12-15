@@ -60,13 +60,27 @@ function writeConfig(newConfig) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(newConfig, null, 2), 'utf-8');
 }
 
+// 检查是否有真正活跃的 WebSocket 连接
+function hasActiveClients() {
+  for (const client of clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      return true;
+    }
+  }
+  return false;
+}
+
 app.get('/api/status', (_req, res) => {
   const now = Date.now();
-  const isAlive = status.lastHeartbeat && now - status.lastHeartbeat < HEARTBEAT_TIMEOUT;
+  const heartbeatAlive = status.lastHeartbeat && now - status.lastHeartbeat < HEARTBEAT_TIMEOUT;
+  // 同时检查：有活跃的 WebSocket 连接 + 心跳未超时
+  const reallyConnected = hasActiveClients() && heartbeatAlive;
+  
   res.json({
-    connected: Boolean(status.isConnected && isAlive),
+    connected: reallyConnected,
     lastHeartbeat: status.lastHeartbeat,
-    deviceInfo: status.deviceInfo
+    deviceInfo: status.deviceInfo,
+    activeClients: clients.size  // 添加活跃客户端数量用于调试
   });
 });
 

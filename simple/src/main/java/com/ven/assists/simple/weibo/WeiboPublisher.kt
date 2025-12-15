@@ -32,13 +32,14 @@ import com.ven.assists.utils.FileDownloadUtil.DownloadResult
 import com.ven.assists.window.AssistsWindowManager
 import com.ven.assists.window.AssistsWindowManager.nonTouchableByAll
 import com.ven.assists.window.AssistsWindowManager.touchableByAll
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -64,6 +65,9 @@ object WeiboPublisher {
     private const val TEMP_SUB_DIR = "weibo_album_temp"
     private var lastCreatedAlbumName: String? = null
     private val savedImageUris = mutableListOf<Uri>()
+    
+    // 从接口动态获取的图片路径列表
+    private var remoteWeiboImagePaths: List<String>? = null
 
     private val httpClient = OkHttpClient()
 
@@ -74,27 +78,17 @@ object WeiboPublisher {
     )
 
     private const val IMAGE_BASE_URL = "https://yxx-1251927313.image.myqcloud.com"
-    private const val UPLOADED_IMAGES_JSON_PATH = "weibo/uploaded_images.json"
     
     private fun getWeiboImagePaths(): List<String> {
-        val service = AssistsService.instance ?: run {
-            android.util.Log.e("WeiboPublisher", "AssistsService 未初始化，无法读取图片路径列表")
-            return emptyList()
-        }
-        return try {
-            val inputStream: InputStream = service.assets.open(UPLOADED_IMAGES_JSON_PATH)
-            val jsonString = inputStream.bufferedReader().use { it.readText() }
-            val jsonArray = JSONArray(jsonString)
-            val paths = mutableListOf<String>()
-            for (i in 0 until jsonArray.length()) {
-                paths.add(jsonArray.getString(i))
+        // 优先使用从接口获取的路径
+        remoteWeiboImagePaths?.let { paths ->
+            if (paths.isNotEmpty()) {
+                android.util.Log.d("WeiboPublisher", "使用接口返回的 ${paths.size} 条图片路径")
+                return paths
             }
-            android.util.Log.d("WeiboPublisher", "成功从 JSON 文件读取 ${paths.size} 条图片路径")
-            paths
-        } catch (e: Exception) {
-            android.util.Log.e("WeiboPublisher", "读取图片路径 JSON 文件失败: ${e.message}", e)
-            emptyList()
         }
+        android.util.Log.w("WeiboPublisher", "未从接口获取到图片路径")
+        return emptyList()
     }
     
     private val WEIBO_IMAGE_PATHS: List<String>
@@ -105,36 +99,48 @@ object WeiboPublisher {
 
     data class RemoteConfig(
         val remoteTailTag: String,
-        val contentTemplate: String
+        val contentTemplate: String,
+        val weiboImagePaths: List<String>
     )
 
-    private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
+    private suspend fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
-            val request = Request.Builder()
-                .url("${ServerConfig.SERVER_BASE_URL}/api/config")
-                .build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
-                    return null
+            withContext(Dispatchers.IO) {
+                log("开始请求控制面板配置: ${ServerConfig.SERVER_BASE_URL}/api/config")
+                val request = Request.Builder()
+                    .url("${ServerConfig.SERVER_BASE_URL}/api/config")
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
+                        return@withContext null
+                    }
+                    val body = response.body?.string().orEmpty()
+                    log("接口响应: ${body.take(200)}...")
+                    if (body.isBlank()) {
+                        log("❌ 控制面板配置响应为空")
+                        return@withContext null
+                    }
+                    val json = JSONObject(body)
+                    val remoteTail = json.optString("tailTag")
+                    val content = json.optString("contentTemplate")
+                    val imagePaths = mutableListOf<String>()
+                    json.optJSONArray("weiboImagePaths")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            imagePaths.add(arr.getString(i))
+                        }
+                    }
+                    if (remoteTail.isBlank() || content.isBlank()) {
+                        log("⚠️ 控制面板返回的配置不完整")
+                    } else {
+                        log("✅ 已从控制面板获取配置，图片路径数: ${imagePaths.size}")
+                    }
+                    RemoteConfig(remoteTail, content, imagePaths)
                 }
-                val body = response.body?.string().orEmpty()
-                if (body.isBlank()) {
-                    log("❌ 控制面板配置响应为空")
-                    return null
-                }
-                val json = JSONObject(body)
-                val remoteTail = json.optString("tailTag")
-                val content = json.optString("contentTemplate")
-                if (remoteTail.isBlank() || content.isBlank()) {
-                    log("⚠️ 控制面板返回的配置不完整")
-                } else {
-                    log("✅ 已从控制面板获取配置")
-                }
-                RemoteConfig(remoteTail, content)
             }
         } catch (e: Exception) {
-            log("❌ 拉取控制面板配置异常: ${e.message}")
+            log("❌ 拉取控制面板配置异常: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
             null
         }
     }
@@ -155,15 +161,31 @@ object WeiboPublisher {
 
     suspend fun publish(context: Context) = with(context) {
         // 启动时优先从控制面板后端获取 tailTag 和要粘贴的文本
-        fetchRemoteConfig(log)?.let { cfg ->
-            if (cfg.remoteTailTag.isNotBlank()) {
-                tailTag = cfg.remoteTailTag
+        val remoteConfig = fetchRemoteConfig(log)
+        if (remoteConfig != null) {
+            if (remoteConfig.remoteTailTag.isNotBlank()) {
+                tailTag = remoteConfig.remoteTailTag
                 log("已从控制面板更新 tailTag：$tailTag")
             }
-            if (cfg.contentTemplate.isNotBlank()) {
-                copyContentToClipboard(cfg.contentTemplate, log)
+            if (remoteConfig.contentTemplate.isNotBlank()) {
+                copyContentToClipboard(remoteConfig.contentTemplate, log)
             }
-        } ?: log("⚠️ 未能从控制面板获取配置，使用当前本地 tailTag 和剪贴板内容")
+            if (remoteConfig.weiboImagePaths.isNotEmpty()) {
+                remoteWeiboImagePaths = remoteConfig.weiboImagePaths
+                log("✅ 已从控制面板获取 ${remoteConfig.weiboImagePaths.size} 条图片路径")
+            } else {
+                log("⚠️ 控制面板返回的 weiboImagePaths 为空")
+            }
+        } else {
+            log("⚠️ 未能从控制面板获取配置")
+        }
+        
+        // 校验图片路径是否已获取
+        if (remoteWeiboImagePaths.isNullOrEmpty()) {
+            log("❌ 图片路径未获取成功(remoteWeiboImagePaths为空)，终止流程")
+            return
+        }
+        
         if (!prepareWeiboAlbumImages(log)) {
             log("❌ 初始化微博素材图片失败")
             return
@@ -351,8 +373,21 @@ object WeiboPublisher {
         val albumName = generateRandomAlbumName()
         log("准备下载微博素材图片，目标相册：$albumName")
         val tempFiles = mutableListOf<File>()
-        val selectedUrls = WEIBO_IMAGE_URLS.shuffled().take(2)
-        log("本次将下载 ${selectedUrls.size} 张随机素材")
+        
+        // 校验图片URL列表
+        val allUrls = WEIBO_IMAGE_URLS
+        if (allUrls.isEmpty()) {
+            log("❌ 图片URL列表为空，无法下载")
+            return false
+        }
+        log("可用图片URL数量: ${allUrls.size}")
+        
+        val selectedUrls = allUrls.shuffled().take(2)
+        if (selectedUrls.isEmpty()) {
+            log("❌ 未选中任何图片进行下载")
+            return false
+        }
+        log("本次将下载 ${selectedUrls.size} 张随机素材: ${selectedUrls.joinToString(", ")}")
         try {
             selectedUrls.forEachIndexed { index, url ->
                 when (val result = FileDownloadUtil.downloadFile(
@@ -754,16 +789,25 @@ object WeiboPublisher {
     }
 
     private suspend fun Context.chooseAlbumFromDialog(albumName: String): Boolean {
+        log("开始查找相册: $albumName")
         val recyclerViews = mutableListOf<AccessibilityNodeInfo>()
         recyclerViews.addAll(findByTags("androidx.recyclerview.widget.RecyclerView"))
         recyclerViews.addAll(findByTags("android.support.v7.widget.RecyclerView"))
+        log("找到 ${recyclerViews.size} 个 RecyclerView")
+        
+        val foundAlbumNames = mutableListOf<String>()
         recyclerViews.forEach { recyclerView ->
+            log("RecyclerView 子节点数: ${recyclerView.childCount}")
             for (index in 0 until recyclerView.childCount) {
                 val child = recyclerView.getChild(index) ?: continue
                 if (child.className?.contains("ViewGroup", ignoreCase = true) == true) {
                     child.findByTags("android.widget.TextView").forEach { textView ->
                         val text = textView.text?.toString() ?: ""
+                        if (text.isNotEmpty()) {
+                            foundAlbumNames.add(text)
+                        }
                         if (text == albumName) {
+                            log("✅ 找到目标相册: $albumName")
                             showClickEffect(textView, "选择相册 $albumName")
                             delay(100)
                             if (child.click() || textView.findFirstParentClickable()?.click() == true || textView.click()) {
@@ -774,6 +818,7 @@ object WeiboPublisher {
                 }
             }
         }
+        log("相册列表中找到的所有名称: ${foundAlbumNames.joinToString(", ")}")
         return false
     }
 

@@ -6,11 +6,19 @@ const deviceInfo = document.getElementById('deviceInfo');
 const nowEl = document.getElementById('now');
 const tailTagInput = document.getElementById('tailTagInput');
 const contentInput = document.getElementById('contentInput');
+const weiboImagePathsInput = document.getElementById('weiboImagePathsInput');
+const imagePreviewContainer = document.getElementById('imagePreviewContainer');
 const douyinTailTagInput = document.getElementById('douyinTailTagInput');
 const douyinContentInput = document.getElementById('douyinContentInput');
 
 const kuaishouContentInput = document.getElementById('kuaishouContentInput');
 const toastRoot = document.getElementById('toast-root');
+
+// 清理JSON中的末尾逗号（支持每行末尾有逗号的格式）
+function cleanJsonTrailingCommas(jsonStr) {
+  // 移除数组和对象中最后一个元素后的逗号
+  return jsonStr.replace(/,\s*([\]\}])/g, '$1');
+}
 
 const refreshBtn = document.getElementById('refreshStatus');
 const saveConfigBtn = document.getElementById('saveConfig');
@@ -121,6 +129,11 @@ async function loadConfig() {
     douyinTailTagInput.value = data.douyinTailTag || '';
     douyinContentInput.value = data.douyinContentTemplate || '';
     kuaishouContentInput.value = data.kuaishouContentTemplate || '';
+    
+    // 加载微博图片路径（作为JSON数组显示）
+    const imagePaths = data.weiboImagePaths || [];
+    weiboImagePathsInput.value = JSON.stringify(imagePaths, null, 2);
+    updateImagePreview(imagePaths);
   } catch (err) {
     console.error('加载配置失败', err);
     showToast('加载配置失败', 'error');
@@ -128,12 +141,34 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
+  // 解析图片路径（支持JSON格式）
+  let imagePaths = [];
+  const imagePathsText = weiboImagePathsInput.value.trim();
+  
+  if (imagePathsText) {
+    try {
+      // 尝试解析为JSON数组（支持末尾逗号）
+      const cleanedJson = cleanJsonTrailingCommas(imagePathsText);
+      imagePaths = JSON.parse(cleanedJson);
+      if (!Array.isArray(imagePaths)) {
+        throw new Error('Not an array');
+      }
+    } catch (e) {
+      // 如果不是JSON，则按行分割
+      imagePaths = imagePathsText
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
+    }
+  }
+  
   const body = {
     tailTag: tailTagInput.value.trim(),
     contentTemplate: contentInput.value,
     douyinTailTag: douyinTailTagInput.value.trim(),
     douyinContentTemplate: douyinContentInput.value,
-    kuaishouContentTemplate: kuaishouContentInput.value
+    kuaishouContentTemplate: kuaishouContentInput.value,
+    weiboImagePaths: imagePaths
   };
   try {
     const res = await fetch('/api/config', {
@@ -143,6 +178,8 @@ async function saveConfig() {
     });
     const data = await res.json();
     showToast(data.message || '配置已保存', 'success');
+    // 更新图片预览
+    updateImagePreview(imagePaths);
   } catch (err) {
     showToast('保存失败: ' + err.message, 'error');
   }
@@ -194,6 +231,65 @@ if (saveConfigBtnKuaishou) {
 }
 if (publishBtnKuaishou) {
   publishBtnKuaishou.addEventListener('click', publish);
+}
+
+// 图片预览功能
+const IMAGE_BASE_URL = 'https://yxx-1251927313.image.myqcloud.com';
+
+function updateImagePreview(imagePaths) {
+  if (!imagePreviewContainer) return;
+  
+  imagePreviewContainer.innerHTML = '';
+  
+  if (!imagePaths || imagePaths.length === 0) {
+    imagePreviewContainer.innerHTML = '<div class="image-preview-empty">暂无图片</div>';
+    return;
+  }
+  
+  imagePaths.forEach(path => {
+    // 完整URL：基础URL + 路径（路径本身不含扩展名，自动添加）
+    const fullUrl = `${IMAGE_BASE_URL}/${path}`;
+    const item = document.createElement('div');
+    item.className = 'image-preview-item';
+    
+    const img = document.createElement('img');
+    img.src = fullUrl;
+    img.alt = path;
+    img.onerror = () => {
+      img.style.display = 'none';
+      item.innerHTML = '<div class="image-preview-empty">加载失败</div>';
+    };
+    
+    item.appendChild(img);
+    imagePreviewContainer.appendChild(item);
+  });
+}
+
+// 监听输入框变化，实时预览
+if (weiboImagePathsInput) {
+  weiboImagePathsInput.addEventListener('input', () => {
+    let imagePaths = [];
+    const imagePathsText = weiboImagePathsInput.value.trim();
+    
+    if (imagePathsText) {
+      try {
+        // 尝试解析为JSON数组（支持末尾逗号）
+        const cleanedJson = cleanJsonTrailingCommas(imagePathsText);
+        imagePaths = JSON.parse(cleanedJson);
+        if (!Array.isArray(imagePaths)) {
+          throw new Error('Not an array');
+        }
+      } catch (e) {
+        // 如果不是JSON，则按行分割
+        imagePaths = imagePathsText
+          .split('\n')
+          .map(line => line.trim())
+          .filter(line => line.length > 0);
+      }
+    }
+    
+    updateImagePreview(imagePaths);
+  });
 }
 
 setInterval(() => {

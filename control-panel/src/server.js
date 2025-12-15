@@ -50,7 +50,8 @@ function readConfig() {
       contentTemplate: '',
       douyinTailTag: '',
       douyinContentTemplate: '',
-      kuaishouContentTemplate: ''
+      kuaishouContentTemplate: '',
+      weiboImagePaths: []
     };
   }
 }
@@ -74,7 +75,7 @@ app.get('/api/config', (_req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { tailTag, contentTemplate, douyinTailTag, douyinContentTemplate, kuaishouContentTemplate } = req.body || {};
+  const { tailTag, contentTemplate, douyinTailTag, douyinContentTemplate, kuaishouContentTemplate, weiboImagePaths } = req.body || {};
   if (typeof tailTag !== 'string' || typeof contentTemplate !== 'string') {
     return res.status(400).json({ message: 'tailTag and contentTemplate are required.' });
   }
@@ -83,7 +84,8 @@ app.post('/api/config', (req, res) => {
     contentTemplate,
     douyinTailTag: douyinTailTag || '',
     douyinContentTemplate: douyinContentTemplate || '',
-    kuaishouContentTemplate: kuaishouContentTemplate || ''
+    kuaishouContentTemplate: kuaishouContentTemplate || '',
+    weiboImagePaths: Array.isArray(weiboImagePaths) ? weiboImagePaths : []
   };
   writeConfig(config);
   res.json({ message: 'Configuration saved.', config });

@@ -49,7 +49,7 @@ function readConfig() {
       tailTag: '', 
       contentTemplates: [],
       douyinTailTag: '',
-      douyinContentTemplate: '',
+      douyinContentTemplates: [],
       kuaishouContentTemplate: '',
       weiboImagePaths: []
     };
@@ -89,7 +89,7 @@ app.get('/api/config', (_req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { tailTag, contentTemplates, douyinTailTag, douyinContentTemplate, kuaishouContentTemplate, weiboImagePaths } = req.body || {};
+  const { tailTag, contentTemplates, douyinTailTag, douyinContentTemplates, kuaishouContentTemplate, weiboImagePaths } = req.body || {};
   if (typeof tailTag !== 'string') {
     return res.status(400).json({ message: 'tailTag is required.' });
   }
@@ -97,7 +97,7 @@ app.post('/api/config', (req, res) => {
     tailTag, 
     contentTemplates: Array.isArray(contentTemplates) ? contentTemplates : [],
     douyinTailTag: douyinTailTag || '',
-    douyinContentTemplate: douyinContentTemplate || '',
+    douyinContentTemplates: Array.isArray(douyinContentTemplates) ? douyinContentTemplates : [],
     kuaishouContentTemplate: kuaishouContentTemplate || '',
     weiboImagePaths: Array.isArray(weiboImagePaths) ? weiboImagePaths : []
   };
@@ -112,10 +112,11 @@ app.post('/api/publish', (req, res) => {
   let payload;
   if (platform === 'douyin') {
     // 抖音发布
+    const douyinContentTemplates = req.body?.content ?? config.douyinContentTemplates;
     payload = {
       type: 'publish_douyin',
       douyinTailTag: config.douyinTailTag,
-      douyinContentTemplate: req.body?.content ?? config.douyinContentTemplate,
+      douyinContentTemplates: Array.isArray(douyinContentTemplates) ? douyinContentTemplates : [douyinContentTemplates],
       timestamp: Date.now()
     };
   } else if (platform === 'kuaishou') {

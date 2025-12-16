@@ -12,7 +12,9 @@ import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.simple.weibo.WeiboPublisher
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 /**
  * 复用微博发布的上下文，后续如果需要独立能力再拆分。
@@ -26,9 +28,9 @@ object DouyinPublisher {
     private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
     
     /**
-     * 抖音文案模板，可在外部进行配置
+     * 抖音文案模板列表，可在外部进行配置
      */
-    var contentTemplate: String = "零基础学前端怕坚持不下来、被拖延症耳误？9年前端带徒，我来监督！从 HTML、CSS入门，逐步攻克 JS、Vue、React，最后练小程序/Uniapp项目。正向反馈看得见进步。日常督促打卡，想有人盯着学，跟我一起搞定前端！#前端 #程序员"
+    var contentTemplates: List<String> = listOf("零基础学前端怕坚持不下来、被拖延症耳误？9年前端带徒，我来监督！从 HTML、CSS入门，逐步攻克 JS、Vue、React，最后练小程序/Uniapp项目。正向反馈看得见进步。日常督促打卡，想有人盯着学，跟我一起搞定前端！#前端 #程序员")
         @Synchronized get
         @Synchronized set
     
@@ -45,56 +47,116 @@ object DouyinPublisher {
         val weiboTailTag: String,
         val weiboContentTemplate: String,
         val douyinTailTag: String,
-        val douyinContentTemplate: String
+        val douyinContentTemplates: List<String>
     )
 
-    private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
+    private suspend fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
-            val request = okhttp3.Request.Builder()
-                .url("${SERVER_BASE_URL}/api/config")
-                .build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
-                    return null
+            withContext(Dispatchers.IO) {
+                log("开始请求控制面板配置: ${SERVER_BASE_URL}/api/config")
+                val request = okhttp3.Request.Builder()
+                    .url("${SERVER_BASE_URL}/api/config")
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
+                        return@withContext null
+                    }
+                    val body = response.body?.string().orEmpty()
+                    log("接口响应: ${body.take(200)}...")
+                    if (body.isBlank()) {
+                        log("❌ 控制面板配置响应为空")
+                        return@withContext null
+                    }
+                    val json = org.json.JSONObject(body)
+                    val weiboTail = json.optString("tailTag", "")
+                    val weiboContent = json.optString("contentTemplate", "")
+                    val douyinTail = json.optString("douyinTailTag", "")
+                    
+                    // 解析 douyinContentTemplates 数组
+                    val douyinContents = mutableListOf<String>()
+                    json.optJSONArray("douyinContentTemplates")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            douyinContents.add(arr.getString(i))
+                        }
+                    }
+                    
+                    if (douyinTail.isBlank() || douyinContents.isEmpty()) {
+                        log("⚠️ 控制面板返回的抖音配置不完整")
+                    } else {
+                        log("✅ 已从控制面板获取配置，抖音文案数: ${douyinContents.size}")
+                    }
+                    RemoteConfig(weiboTail, weiboContent, douyinTail, douyinContents)
                 }
-                val body = response.body?.string().orEmpty()
-                if (body.isBlank()) {
-                    log("❌ 控制面板配置响应为空")
-                    return null
-                }
-                val json = org.json.JSONObject(body)
-                val weiboTail = json.optString("tailTag", "")
-                val weiboContent = json.optString("contentTemplate", "")
-                val douyinTail = json.optString("douyinTailTag", "")
-                val douyinContent = json.optString("douyinContentTemplate", "")
-                log("✅ 已从控制面板获取配置")
-                RemoteConfig(weiboTail, weiboContent, douyinTail, douyinContent)
             }
         } catch (e: Exception) {
-            log("❌ 拉取控制面板配置异常: ${e.message}")
+            log("❌ 拉取控制面板配置异常: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
             null
         }
     }
 
     suspend fun publish(context: DouyinContext) = with(context) {
-        // 启动时优先从控制面板后端获取 tailTag 和 contentTemplate
-        fetchRemoteConfig(log)?.let { cfg ->
-            if (cfg.douyinTailTag.isNotBlank()) {
-                tailTag = cfg.douyinTailTag
-                log("已从控制面板更新抖音 tailTag：$tailTag")
+        // 启动时优先从控制面板后端获取 tailTag 和 contentTemplates
+        val remoteConfig = fetchRemoteConfig(log)
+        if (remoteConfig == null) {
+            log("⚠️ 未能从控制面板获取抖音配置，终止流程")
+            return@with
+        }
+        
+        if (remoteConfig.douyinTailTag.isNotBlank()) {
+            tailTag = remoteConfig.douyinTailTag
+            log("已从控制面板更新抖音 tailTag：$tailTag")
+        }
+        
+        if (remoteConfig.douyinContentTemplates.isEmpty()) {
+            log("❌ 控制面板返回的 douyinContentTemplates 为空，终止流程")
+            return@with
+        }
+        
+        val totalCount = remoteConfig.douyinContentTemplates.size
+        log("📢 抖音发布任务启动，共 $totalCount 条文案需要发布")
+        
+        // 直接使用接口返回的 douyinContentTemplates 数组进行遍历
+        remoteConfig.douyinContentTemplates.forEachIndexed { index, contentTemplate ->
+            log("\n========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
+            log("文案内容: ${contentTemplate.take(50)}...")
+            
+            // 设置当前文案到临时变量
+            currentContentTemplate = contentTemplate
+            
+            // 执行单次发布流程
+            val success = publishSingle(context)
+            
+            if (success) {
+                log("✅ 第 ${index + 1}/$totalCount 条文案发布成功")
+            } else {
+                log("❌ 第 ${index + 1}/$totalCount 条文案发布失败")
             }
-            if (cfg.douyinContentTemplate.isNotBlank()) {
-                contentTemplate = cfg.douyinContentTemplate
-                log("已从控制面板更新抖音 contentTemplate")
+            
+            // 如果不是最后一条，等待 30 秒
+            if (index < totalCount - 1) {
+                log("⏳ 等待 30 秒后发布下一条文案...")
+                delay(30000)
             }
-        } ?: log("⚠️ 未能从控制面板获取抖音配置，使用当前本地配置")
+        }
+        
+        log("\n🎉 抖音发布任务完成，共发布 $totalCount 条文案")
+    }
+    
+    // 当前正在发布的文案
+    private var currentContentTemplate: String = ""
+    
+    /**
+     * 执行单次抖音发布流程
+     */
+    private suspend fun publishSingle(context: DouyinContext): Boolean = with(context) {
         log("🚧 抖音自动化发布流程（阶段一：点击底部+号）")
         if (clickBottomAddButton()) {
             log("✅ 已点击底部加号按钮")
         } else {
             log("❌ 未能点击底部加号按钮，请确认抖音是否停留在首页")
-            return@with
+            return@with false
         }
 
         delay(3000)
@@ -103,13 +165,13 @@ object DouyinPublisher {
             log("✅ 已点击文字按钮")
         } else {
             log("❌ 未能点击文字按钮")
-            return@with
+            return@with false
         }
 
         // 文案输入页面
         if (!fillDouyinTextContent()) {
             log("❌ 填充抖音文案失败")
-            return@with
+            return@with false
         }
 
         delay(1000)
@@ -118,7 +180,7 @@ object DouyinPublisher {
             log("✅ 已点击第一个下一步按钮")
         } else {
             log("❌ 未能点击第一个下一步按钮")
-            return@with
+            return@with false
         }
 
         log("⏳ 等待页面稳定，延时5秒...")
@@ -132,34 +194,35 @@ object DouyinPublisher {
         }
         
         delay(5000)
-        log("🚧 抖音自动化发布流程（阶段四：点击第二个下一步）")
+        log("🚧 抖音自动化发布流程（阶段4：点击第二个下一步）")
         if (clickNextButtonInFrame()) {
             log("✅ 已点击第二个下一步按钮")
         } else {
             log("❌ 未能点击第二个下一步按钮")
-            return@with
+            return@with false
         }
 
         delay(1000)
-        log("🚧 抖音自动化发布流程（阶段五：添加话题标签）")
+        log("🚧 抖音自动化发布流程（阶段5：添加话题标签）")
         if (fillDouyinTopicTags()) {
             log("✅ 已添加话题标签")
         } else {
             log("❌ 未能添加话题标签")
-            return@with
+            return@with false
         }
 
         delay(1000)
-        log("🚧 抖音自动化发布流程（阶段六：点击发布按钮）")
+        log("🚧 抖音自动化发布流程（阶段6：点击发布按钮）")
         if (clickPublishButton()) {
             log("✅ 已点击发布按钮")
         } else {
             log("❌ 未能点击发布按钮")
-            return@with
+            return@with false
         }
 
         delay(500)
-        log("✅ 抖音变布流程完成！")
+        log("✅ 单条抖音发布流程完成！")
+        return@with true
     }
 
     private suspend fun DouyinContext.clickBottomAddButton(): Boolean {
@@ -211,7 +274,7 @@ object DouyinPublisher {
         AssistsCore.gestureClick(cx, cy)
         delay(200)
 
-        val target = contentTemplate
+        val target = currentContentTemplate
 
         // 方案1：setNodeText
         if (edit.refresh() && edit.setNodeText(target)) {
@@ -800,9 +863,9 @@ object DouyinPublisher {
         val beforeLength = beforeText.length
         log("粘贴前输入框文本长度: $beforeLength")
 
-        // 拼接完整内容：文案 + 空格 + 标签
-        val fullContent = "$contentTemplate $tailTag"
-        log("准备填充完整内容: $fullContent")
+        // 话题标签输入框只需要填充标签
+        val fullContent = tailTag
+        log("准备填充话题标签: $fullContent")
 
         log("步骤3: 执行粘贴操作")
         var pasteAttempted = false
@@ -876,7 +939,7 @@ object DouyinPublisher {
             val afterLength = afterText.length
             log("粘贴后输入框文本长度: $afterLength")
             log("粘贴后输入框内容: ${afterText.take(100)}...")
-            if (afterLength > beforeLength || afterText.contains(contentTemplate) || afterText.contains(tailTag)) {
+            if (afterLength > beforeLength || afterText.contains(tailTag)) {
                 log("✅ 话题标签添加成功")
                 return true
             }

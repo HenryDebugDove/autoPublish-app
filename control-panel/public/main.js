@@ -18,6 +18,24 @@ function cleanJsonTrailingCommas(jsonStr) {
   return jsonStr.replace(/,\s*([\]\}])/g, '$1');
 }
 
+// 解析抖音文案数组
+function parseDouyinContentTemplates() {
+  const contentText = douyinContentInput.value.trim();
+  if (!contentText) return [];
+  
+  try {
+    const cleanedJson = cleanJsonTrailingCommas(contentText);
+    const parsed = JSON.parse(cleanedJson);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    return [contentText];
+  } catch (e) {
+    // 如果不是JSON，则作为单条文案
+    return [contentText];
+  }
+}
+
 const refreshBtn = document.getElementById('refreshStatus');
 const saveConfigBtn = document.getElementById('saveConfig');
 const publishBtn = document.getElementById('publishBtn');
@@ -141,7 +159,11 @@ async function loadConfig() {
     contentInput.value = JSON.stringify(contentTemplates, null, 2);
     
     douyinTailTagInput.value = data.douyinTailTag || '';
-    douyinContentInput.value = data.douyinContentTemplate || '';
+    
+    // 加载抖音文案内容（作为JSON数组显示）
+    const douyinContentTemplates = data.douyinContentTemplates || [];
+    douyinContentInput.value = JSON.stringify(douyinContentTemplates, null, 2);
+    
     kuaishouContentInput.value = data.kuaishouContentTemplate || '';
     
     // 加载微博图片路径（作为JSON数组显示）
@@ -198,7 +220,7 @@ async function saveConfig() {
     tailTag: tailTagInput.value.trim(),
     contentTemplates: contentTemplates,
     douyinTailTag: douyinTailTagInput.value.trim(),
-    douyinContentTemplate: douyinContentInput.value,
+    douyinContentTemplates: parseDouyinContentTemplates(),
     kuaishouContentTemplate: kuaishouContentInput.value,
     weiboImagePaths: imagePaths
   };
@@ -235,7 +257,8 @@ async function publish() {
         content = [contentText];
       }
     } else if (platform === 'douyin') {
-      content = douyinContentInput.value;
+      // 抖音文案是数组，发布时传递整个数组
+      content = parseDouyinContentTemplates();
     } else {
       content = kuaishouContentInput.value;
     }

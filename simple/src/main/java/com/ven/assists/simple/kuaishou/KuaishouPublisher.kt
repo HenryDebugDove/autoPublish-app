@@ -12,7 +12,12 @@ import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.simple.weibo.WeiboPublisher
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 
 /**
  * 复用微博发布的上下文，后续如果需要独立能力再拆分。
@@ -26,67 +31,114 @@ object KuaishouPublisher {
     private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
     
     /**
-     * 快手文案模板，可在外部进行配置
+     * 当前发布的文案内容（由循环中临时设置）
      */
-    var contentTemplate: String = "零基础学前端怕坚持不下来、被拖延症耽误？9年前端带徒，我来监督！从 HTML、CSS入门，逐步攻克 JS、Vue、React，最后练小程序/Uniapp项目。正向反馈看得见进步。日常督促打卡，想有人盯着学，跟我一起搞定前端！#前端 #前端教学"
+    var currentContentTemplate: String = ""
         @Synchronized get
         @Synchronized set
 
-    private val httpClient = okhttp3.OkHttpClient()
+    private val httpClient = OkHttpClient()
 
     data class RemoteConfig(
-        val weiboTailTag: String,
-        val weiboContentTemplate: String,
-        val douyinTailTag: String,
-        val douyinContentTemplate: String,
-        val kuaishouContentTemplate: String
+        val kuaishouContentTemplates: List<String>
     )
 
-    private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
+    private suspend fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
-            val request = okhttp3.Request.Builder()
-                .url("${SERVER_BASE_URL}/api/config")
-                .build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
-                    return null
+            withContext(Dispatchers.IO) {
+                log("开始请求控制面板配置: ${SERVER_BASE_URL}/api/config")
+                val request = Request.Builder()
+                    .url("${SERVER_BASE_URL}/api/config")
+                    .build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        log("❌ 拉取控制面板配置失败: HTTP ${response.code}")
+                        return@withContext null
+                    }
+                    val body = response.body?.string().orEmpty()
+                    log("接口响应: ${body.take(200)}...")
+                    if (body.isBlank()) {
+                        log("❌ 控制面板配置响应为空")
+                        return@withContext null
+                    }
+                    val json = JSONObject(body)
+                    
+                    // 解析 kuaishouContentTemplates 数组
+                    val contentTemplates = mutableListOf<String>()
+                    json.optJSONArray("kuaishouContentTemplates")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            contentTemplates.add(arr.getString(i))
+                        }
+                    }
+                    
+                    if (contentTemplates.isEmpty()) {
+                        log("⚠️ 控制面板返回的快手配置不完整")
+                    } else {
+                        log("✅ 已从控制面板获取快手配置，文案数: ${contentTemplates.size}")
+                    }
+                    RemoteConfig(contentTemplates)
                 }
-                val body = response.body?.string().orEmpty()
-                if (body.isBlank()) {
-                    log("❌ 控制面板配置响应为空")
-                    return null
-                }
-                val json = org.json.JSONObject(body)
-                val weiboTail = json.optString("tailTag", "")
-                val weiboContent = json.optString("contentTemplate", "")
-                val douyinTail = json.optString("douyinTailTag", "")
-                val douyinContent = json.optString("douyinContentTemplate", "")
-                val kuaishouContent = json.optString("kuaishouContentTemplate", "")
-                log("✅ 已从控制面板获取配置")
-                RemoteConfig(weiboTail, weiboContent, douyinTail, douyinContent, kuaishouContent)
             }
         } catch (e: Exception) {
-            log("❌ 拉取控制面板配置异常: ${e.message}")
+            log("❌ 拉取控制面板配置异常: ${e.javaClass.simpleName} - ${e.message}")
+            e.printStackTrace()
             null
         }
     }
 
     suspend fun publish(context: KuaishouContext) = with(context) {
-        // 启动时优先从控制面板后端获取 contentTemplate
-        fetchRemoteConfig(log)?.let { cfg ->
-            if (cfg.kuaishouContentTemplate.isNotBlank()) {
-                contentTemplate = cfg.kuaishouContentTemplate
-                log("已从控制面板更新快手 contentTemplate")
-            }
-        } ?: log("⚠️ 未能从控制面板获取快手配置，使用当前本地配置")
+        // 启动时优先从控制面板后端获取文案列表
+        val remoteConfig = fetchRemoteConfig(log)
+        if (remoteConfig == null) {
+            log("⚠️ 未能从控制面板获取快手配置，终止流程")
+            return@with
+        }
         
+        if (remoteConfig.kuaishouContentTemplates.isEmpty()) {
+            log("❌ 控制面板返回的 kuaishouContentTemplates 为空，终止流程")
+            return@with
+        }
+        
+        val totalCount = remoteConfig.kuaishouContentTemplates.size
+        log("共有 $totalCount 条文案需要发布")
+        
+        // 循环发布每条文案
+        remoteConfig.kuaishouContentTemplates.forEachIndexed { index, contentTemplate ->
+            log("========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
+            log("文案内容: ${contentTemplate.take(50)}...")
+            
+            // 设置当前文案
+            currentContentTemplate = contentTemplate
+            
+            // 执行单次发布流程
+            val success = publishSingle(context)
+            
+            if (success) {
+                log("✅ 第 ${index + 1}/$totalCount 条文案发布成功")
+            } else {
+                log("❌ 第 ${index + 1}/$totalCount 条文案发布失败")
+            }
+            
+            // 如果不是最后一条，等待30秒后继续下一条
+            if (index < totalCount - 1) {
+                log("等待 30 秒后发布下一条文案...")
+                delay(30000)
+            }
+        }
+        
+        log("========== 所有 $totalCount 条文案发布完成 ==========")
+    }
+    
+    /**
+     * 单次发布流程
+     */
+    private suspend fun publishSingle(context: KuaishouContext): Boolean = with(context) {
         log("🚧 快手自动化发布流程（阶段一：点击底部加号）")
         if (clickBottomAddButton()) {
             log("✅ 已点击底部加号按钮")
         } else {
             log("❌ 未能点击底部加号按钮，请确认快手是否停留在首页")
-            return@with
+            return@with false
         }
         
         log("⏳ 等待页面响应，延时3秒...")
@@ -97,7 +149,7 @@ object KuaishouPublisher {
             log("✅ 已点击文字按钮")
         } else {
             log("❌ 未能点击文字按钮")
-            return@with
+            return@with false
         }
         
         // 阶段三 - 填写文案内容
@@ -109,7 +161,7 @@ object KuaishouPublisher {
             log("✅ 已填充文案内容")
         } else {
             log("❌ 填充文案内容失败")
-            return@with
+            return@with false
         }
         
         log("⏳ 等待内容保存，延时3秒...")
@@ -120,7 +172,7 @@ object KuaishouPublisher {
             log("✅ 已点击下一步按钮")
         } else {
             log("❌ 未能点击下一步按钮")
-            return@with
+            return@with false
         }
         
         log("⏳ 等待页面稳定，延时3秒...")
@@ -131,13 +183,12 @@ object KuaishouPublisher {
             log("✅ 已点击发布按钮")
         } else {
             log("❌ 未能点击发布按钮")
-            return@with
+            return@with false
         }
         
         delay(500)
         log("✅ 快手发布流程完成！")
-        
-        log("✅ 快手发布流程架子搭建完成，等待后续调试补充")
+        return@with true
     }
 
     /**
@@ -436,7 +487,7 @@ object KuaishouPublisher {
         AssistsCore.gestureClick(cx, cy)
         delay(200)
 
-        val target = contentTemplate
+        val target = currentContentTemplate
 
         // 方案1：setNodeText
         if (edit.refresh() && edit.setNodeText(target)) {

@@ -231,9 +231,13 @@
                 <line x1="16" y1="17" x2="8" y2="17"></line>
                 <polyline points="10 9 9 9 8 9"></polyline>
               </svg>
-              文案内容
+              文案内容（JSON数组格式，多条文案）
             </label>
-            <textarea class="form-textarea" id="kuaishouContentInput" rows="8" placeholder="请输入快手文案内容..."></textarea>
+            <textarea class="form-textarea" id="kuaishouContentInput" rows="12" placeholder='[
+  "第一条快手文案内容...",
+  "第二条快手文案内容...",
+  "第三条快手文案内容..."
+]'></textarea>
           </div>
           <div class="button-group">
             <button class="btn btn-secondary" id="saveConfigKuaishou">

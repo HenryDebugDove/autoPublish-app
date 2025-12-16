@@ -50,7 +50,7 @@ function readConfig() {
       contentTemplates: [],
       douyinTailTag: '',
       douyinContentTemplates: [],
-      kuaishouContentTemplate: '',
+      kuaishouContentTemplates: [],
       weiboImagePaths: []
     };
   }
@@ -89,7 +89,7 @@ app.get('/api/config', (_req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { tailTag, contentTemplates, douyinTailTag, douyinContentTemplates, kuaishouContentTemplate, weiboImagePaths } = req.body || {};
+  const { tailTag, contentTemplates, douyinTailTag, douyinContentTemplates, kuaishouContentTemplates, weiboImagePaths } = req.body || {};
   if (typeof tailTag !== 'string') {
     return res.status(400).json({ message: 'tailTag is required.' });
   }
@@ -98,7 +98,7 @@ app.post('/api/config', (req, res) => {
     contentTemplates: Array.isArray(contentTemplates) ? contentTemplates : [],
     douyinTailTag: douyinTailTag || '',
     douyinContentTemplates: Array.isArray(douyinContentTemplates) ? douyinContentTemplates : [],
-    kuaishouContentTemplate: kuaishouContentTemplate || '',
+    kuaishouContentTemplates: Array.isArray(kuaishouContentTemplates) ? kuaishouContentTemplates : [],
     weiboImagePaths: Array.isArray(weiboImagePaths) ? weiboImagePaths : []
   };
   writeConfig(config);
@@ -121,9 +121,10 @@ app.post('/api/publish', (req, res) => {
     };
   } else if (platform === 'kuaishou') {
     // 快手发布
+    const kuaishouContentTemplates = req.body?.content ?? config.kuaishouContentTemplates;
     payload = {
       type: 'publish_kuaishou',
-      kuaishouContentTemplate: req.body?.content ?? config.kuaishouContentTemplate,
+      kuaishouContentTemplates: Array.isArray(kuaishouContentTemplates) ? kuaishouContentTemplates : [kuaishouContentTemplates],
       timestamp: Date.now()
     };
   } else {

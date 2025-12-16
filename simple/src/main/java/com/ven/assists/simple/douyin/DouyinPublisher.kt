@@ -11,7 +11,7 @@ import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.simple.weibo.WeiboPublisher
-import com.ven.assists.simple.config.ServerConfig
+
 import kotlinx.coroutines.delay
 
 /**
@@ -23,6 +23,8 @@ typealias DouyinContext = WeiboPublisher.Context
  * 抖音自动化发布流程（预留架子，后续逐步补全）
  */
 object DouyinPublisher {
+    private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
+    
     /**
      * 抖音文案模板，可在外部进行配置
      */
@@ -49,7 +51,7 @@ object DouyinPublisher {
     private fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
             val request = okhttp3.Request.Builder()
-                .url("${ServerConfig.SERVER_BASE_URL}/api/config")
+                .url("${SERVER_BASE_URL}/api/config")
                 .build()
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

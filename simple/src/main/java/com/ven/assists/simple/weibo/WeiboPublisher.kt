@@ -26,7 +26,7 @@ import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.service.AssistsService
-import com.ven.assists.simple.config.ServerConfig
+
 import com.ven.assists.utils.FileDownloadUtil
 import com.ven.assists.utils.FileDownloadUtil.DownloadResult
 import com.ven.assists.window.AssistsWindowManager
@@ -49,6 +49,8 @@ import java.util.UUID
  * 微博自动化发布流程，抽离为可复用组件
  */
 object WeiboPublisher {
+
+    private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
 
     /**
      * 微博文案尾部标签，可在外部进行配置。
@@ -99,16 +101,16 @@ object WeiboPublisher {
 
     data class RemoteConfig(
         val remoteTailTag: String,
-        val contentTemplate: String,
+        val contentTemplates: List<String>,
         val weiboImagePaths: List<String>
     )
 
     private suspend fun fetchRemoteConfig(log: (String) -> Unit): RemoteConfig? {
         return try {
             withContext(Dispatchers.IO) {
-                log("开始请求控制面板配置: ${ServerConfig.SERVER_BASE_URL}/api/config")
+                log("开始请求控制面板配置: ${SERVER_BASE_URL}/api/config")
                 val request = Request.Builder()
-                    .url("${ServerConfig.SERVER_BASE_URL}/api/config")
+                    .url("${SERVER_BASE_URL}/api/config")
                     .build()
                 httpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) {
@@ -123,19 +125,27 @@ object WeiboPublisher {
                     }
                     val json = JSONObject(body)
                     val remoteTail = json.optString("tailTag")
-                    val content = json.optString("contentTemplate")
+                    
+                    // 解析 contentTemplates 数组
+                    val contentTemplates = mutableListOf<String>()
+                    json.optJSONArray("contentTemplates")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            contentTemplates.add(arr.getString(i))
+                        }
+                    }
+                    
                     val imagePaths = mutableListOf<String>()
                     json.optJSONArray("weiboImagePaths")?.let { arr ->
                         for (i in 0 until arr.length()) {
                             imagePaths.add(arr.getString(i))
                         }
                     }
-                    if (remoteTail.isBlank() || content.isBlank()) {
+                    if (remoteTail.isBlank() || contentTemplates.isEmpty()) {
                         log("⚠️ 控制面板返回的配置不完整")
                     } else {
-                        log("✅ 已从控制面板获取配置，图片路径数: ${imagePaths.size}")
+                        log("✅ 已从控制面板获取配置，文案数: ${contentTemplates.size}，图片路径数: ${imagePaths.size}")
                     }
-                    RemoteConfig(remoteTail, content, imagePaths)
+                    RemoteConfig(remoteTail, contentTemplates, imagePaths)
                 }
             }
         } catch (e: Exception) {
@@ -160,24 +170,28 @@ object WeiboPublisher {
     }
 
     suspend fun publish(context: Context) = with(context) {
-        // 启动时优先从控制面板后端获取 tailTag 和要粘贴的文本
+        // 启动时优先从控制面板后端获取 tailTag 和文案列表
         val remoteConfig = fetchRemoteConfig(log)
-        if (remoteConfig != null) {
-            if (remoteConfig.remoteTailTag.isNotBlank()) {
-                tailTag = remoteConfig.remoteTailTag
-                log("已从控制面板更新 tailTag：$tailTag")
-            }
-            if (remoteConfig.contentTemplate.isNotBlank()) {
-                copyContentToClipboard(remoteConfig.contentTemplate, log)
-            }
-            if (remoteConfig.weiboImagePaths.isNotEmpty()) {
-                remoteWeiboImagePaths = remoteConfig.weiboImagePaths
-                log("✅ 已从控制面板获取 ${remoteConfig.weiboImagePaths.size} 条图片路径")
-            } else {
-                log("⚠️ 控制面板返回的 weiboImagePaths 为空")
-            }
+        if (remoteConfig == null) {
+            log("⚠️ 未能从控制面板获取配置，终止流程")
+            return
+        }
+        
+        if (remoteConfig.remoteTailTag.isNotBlank()) {
+            tailTag = remoteConfig.remoteTailTag
+            log("已从控制面板更新 tailTag：$tailTag")
+        }
+        
+        if (remoteConfig.contentTemplates.isEmpty()) {
+            log("❌ 控制面板返回的 contentTemplates 为空，终止流程")
+            return
+        }
+        
+        if (remoteConfig.weiboImagePaths.isNotEmpty()) {
+            remoteWeiboImagePaths = remoteConfig.weiboImagePaths
+            log("✅ 已从控制面板获取 ${remoteConfig.weiboImagePaths.size} 条图片路径")
         } else {
-            log("⚠️ 未能从控制面板获取配置")
+            log("⚠️ 控制面板返回的 weiboImagePaths 为空")
         }
         
         // 校验图片路径是否已获取
@@ -186,54 +200,88 @@ object WeiboPublisher {
             return
         }
         
+        val totalCount = remoteConfig.contentTemplates.size
+        log("共有 $totalCount 条文案需要发布")
+        
+        // 循环发布每条文案
+        remoteConfig.contentTemplates.forEachIndexed { index, contentTemplate ->
+            log("========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
+            log("文案内容: ${contentTemplate.take(50)}...")
+            
+            // 将当前文案写入剪贴板
+            copyContentToClipboard(contentTemplate, log)
+            
+            // 执行单次发布流程
+            val success = publishSingle(context)
+            
+            if (success) {
+                log("✅ 第 ${index + 1}/$totalCount 条文案发布成功")
+            } else {
+                log("❌ 第 ${index + 1}/$totalCount 条文案发布失败")
+            }
+            
+            // 如果不是最后一条，等待30秒后继续下一条
+            if (index < totalCount - 1) {
+                log("等待 20 秒后发布下一条文案...")
+                delay(20000)
+            }
+        }
+        
+        log("========== 所有 $totalCount 条文案发布完成 ==========")
+    }
+    
+    /**
+     * 单次发布流程
+     */
+    private suspend fun publishSingle(context: Context): Boolean = with(context) {
         if (!prepareWeiboAlbumImages(log)) {
             log("❌ 初始化微博素材图片失败")
-            return
+            return false
         }
         log("开始执行微博流程")
         if (!clickTextWithRetry("首页")) {
             log("未找到“首页”入口")
-            return
+            return false
         }
         delay(600)
         if (!clickWeiboAddEntry()) {
             log("未找到微博加号入口")
-            return
+            return false
         }
         delay(500)
         if (!clickTextWithRetry("图片")) {
             log("未找到\"图片\"入口")
-            return
+            return false
         }
         log("已打开图片，等待加载")
         delay(1500)
         if (!selectWeiboImages()) {
             log("未能选中图片")
-            return
+            return false
         }
         delay(500)
         if (!clickTextWithRetry("下一步")) {
             log("未找到\"下一步\"按钮")
-            return
+            return false
         }
         log("已点击第一步的下一步，等待页面加载")
         delay(2000)
         log("准备点击第二步的下一步")
         if (!clickTextWithRetry("下一步")) {
             log("未找到第二步的\"下一步\"按钮")
-            return
+            return false
         }
         log("已点击第二步的下一步，进入发布页面")
         delay(1000)
-        handlePublishPage()
+        return handlePublishPageWithResult()
     }
 
-    private suspend fun Context.handlePublishPage() {
+    private suspend fun Context.handlePublishPageWithResult(): Boolean {
         log("开始处理：先获取输入框焦点，再读取剪切板")
         val inputEditText = findPublishEditText()
         if (inputEditText == null) {
             log("❌ 未找到输入框，无法继续")
-            return
+            return false
         }
 
         log("步骤2: 点击输入框获得焦点")
@@ -307,7 +355,7 @@ object WeiboPublisher {
         val currentEditText = if (inputEditText.refresh()) inputEditText else findPublishEditText()
         if (currentEditText == null) {
             log("未找到输入框，无法添加标签")
-            return
+            return false
         }
         
         val currentText = if (currentEditText.refresh()) {
@@ -354,12 +402,14 @@ object WeiboPublisher {
         log("步骤6: 查找并点击发送按钮")
 //        delay(500)
         log("等待3秒后再点击发送按钮...")
-        delay(3000)
-        if (clickSendButton()) {
+        delay(5000)
+        return if (clickSendButton()) {
             log("✅ 微博发布流程完成")
             cleanupWeiboAlbumResources(log)
+            true
         } else {
             log("❌ 未找到发送按钮")
+            false
         }
     }
 

@@ -135,7 +135,11 @@ async function loadConfig() {
     const res = await fetch('/api/config');
     const data = await res.json();
     tailTagInput.value = data.tailTag || '';
-    contentInput.value = data.contentTemplate || '';
+    
+    // 加载微博文案内容（作为JSON数组显示）
+    const contentTemplates = data.contentTemplates || [];
+    contentInput.value = JSON.stringify(contentTemplates, null, 2);
+    
     douyinTailTagInput.value = data.douyinTailTag || '';
     douyinContentInput.value = data.douyinContentTemplate || '';
     kuaishouContentInput.value = data.kuaishouContentTemplate || '';
@@ -151,6 +155,24 @@ async function loadConfig() {
 }
 
 async function saveConfig() {
+  // 解析微博文案内容（支持JSON数组格式）
+  let contentTemplates = [];
+  const contentText = contentInput.value.trim();
+  
+  if (contentText) {
+    try {
+      // 尝试解析为JSON数组（支持末尾逗号）
+      const cleanedJson = cleanJsonTrailingCommas(contentText);
+      contentTemplates = JSON.parse(cleanedJson);
+      if (!Array.isArray(contentTemplates)) {
+        throw new Error('Not an array');
+      }
+    } catch (e) {
+      // 如果不是JSON，则作为单条文案
+      contentTemplates = [contentText];
+    }
+  }
+  
   // 解析图片路径（支持JSON格式）
   let imagePaths = [];
   const imagePathsText = weiboImagePathsInput.value.trim();
@@ -174,7 +196,7 @@ async function saveConfig() {
   
   const body = {
     tailTag: tailTagInput.value.trim(),
-    contentTemplate: contentInput.value,
+    contentTemplates: contentTemplates,
     douyinTailTag: douyinTailTagInput.value.trim(),
     douyinContentTemplate: douyinContentInput.value,
     kuaishouContentTemplate: kuaishouContentInput.value,
@@ -198,9 +220,25 @@ async function saveConfig() {
 async function publish() {
   try {
     const platform = currentPlatform; // 'weibo' 或 'douyin' 或 'kuaishou'
-    const content = platform === 'weibo' ? contentInput.value : 
-                    platform === 'douyin' ? douyinContentInput.value : 
-                    kuaishouContentInput.value;
+    let content;
+    
+    if (platform === 'weibo') {
+      // 微博文案是数组，发布时传递整个数组
+      const contentText = contentInput.value.trim();
+      try {
+        const cleanedJson = cleanJsonTrailingCommas(contentText);
+        content = JSON.parse(cleanedJson);
+        if (!Array.isArray(content)) {
+          content = [contentText];
+        }
+      } catch (e) {
+        content = [contentText];
+      }
+    } else if (platform === 'douyin') {
+      content = douyinContentInput.value;
+    } else {
+      content = kuaishouContentInput.value;
+    }
     
     console.log('发布平台:', platform);
     console.log('发布内容:', content);

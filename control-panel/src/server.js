@@ -47,7 +47,7 @@ function readConfig() {
     console.error('Failed to read config file:', err.message);
     return { 
       tailTag: '', 
-      contentTemplate: '',
+      contentTemplates: [],
       douyinTailTag: '',
       douyinContentTemplate: '',
       kuaishouContentTemplate: '',
@@ -89,13 +89,13 @@ app.get('/api/config', (_req, res) => {
 });
 
 app.post('/api/config', (req, res) => {
-  const { tailTag, contentTemplate, douyinTailTag, douyinContentTemplate, kuaishouContentTemplate, weiboImagePaths } = req.body || {};
-  if (typeof tailTag !== 'string' || typeof contentTemplate !== 'string') {
-    return res.status(400).json({ message: 'tailTag and contentTemplate are required.' });
+  const { tailTag, contentTemplates, douyinTailTag, douyinContentTemplate, kuaishouContentTemplate, weiboImagePaths } = req.body || {};
+  if (typeof tailTag !== 'string') {
+    return res.status(400).json({ message: 'tailTag is required.' });
   }
   const config = { 
     tailTag, 
-    contentTemplate,
+    contentTemplates: Array.isArray(contentTemplates) ? contentTemplates : [],
     douyinTailTag: douyinTailTag || '',
     douyinContentTemplate: douyinContentTemplate || '',
     kuaishouContentTemplate: kuaishouContentTemplate || '',
@@ -127,10 +127,12 @@ app.post('/api/publish', (req, res) => {
     };
   } else {
     // 微博发布（默认）
+    // content 可能是数组或字符串
+    const contentTemplates = req.body?.content ?? config.contentTemplates;
     payload = {
       type: 'publish',
       tailTag: config.tailTag,
-      content: req.body?.content ?? config.contentTemplate,
+      contentTemplates: Array.isArray(contentTemplates) ? contentTemplates : [contentTemplates],
       timestamp: Date.now()
     };
   }

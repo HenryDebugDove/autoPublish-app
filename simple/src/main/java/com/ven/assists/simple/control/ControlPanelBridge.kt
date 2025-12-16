@@ -11,7 +11,7 @@ import com.ven.assists.simple.overlays.OverlayBasic
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.simple.douyin.DouyinPublisher
 import com.ven.assists.simple.kuaishou.KuaishouPublisher
-import com.ven.assists.simple.config.ServerConfig
+
 import com.ven.assists.utils.CoroutineWrapper
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,6 +31,8 @@ import java.util.concurrent.TimeUnit
 object ControlPanelBridge {
     private const val TAG = "ControlPanelBridge"
     private const val HEARTBEAT_INTERVAL = 10_000L
+    private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
+    private const val WS_URL = "ws://192.168.210.192:4001/ws"
 
     private val okHttpClient = OkHttpClient.Builder()
         .pingInterval(HEARTBEAT_INTERVAL, TimeUnit.MILLISECONDS)
@@ -85,7 +87,7 @@ object ControlPanelBridge {
     }
 
     private fun connect() {
-        val request = Request.Builder().url(ServerConfig.WS_URL).build()
+        val request = Request.Builder().url(WS_URL).build()
         okHttpClient.newWebSocket(request, socketListener)
     }
 
@@ -250,7 +252,7 @@ object ControlPanelBridge {
         CoroutineWrapper.launch {
             try {
                 val request = Request.Builder()
-                    .url("${ServerConfig.SERVER_BASE_URL}/api/config")
+                    .url("${SERVER_BASE_URL}/api/config")
                     .build()
                 okHttpClient.newCall(request).execute().use { response ->
                     if (response.isSuccessful) {

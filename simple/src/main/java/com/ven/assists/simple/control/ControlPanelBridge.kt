@@ -31,8 +31,8 @@ import java.util.concurrent.TimeUnit
 object ControlPanelBridge {
     private const val TAG = "ControlPanelBridge"
     private const val HEARTBEAT_INTERVAL = 10_000L
-    private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
-    private const val WS_URL = "ws://192.168.210.192:4001/ws"
+    private const val SERVER_BASE_URL = "http://192.168.8.192:4001"
+    private const val WS_URL = "ws://192.168.8.192:4001/ws"
 
     private val okHttpClient = OkHttpClient.Builder()
         .pingInterval(HEARTBEAT_INTERVAL, TimeUnit.MILLISECONDS)
@@ -210,14 +210,9 @@ object ControlPanelBridge {
 
     private fun handleDouyinPublishCommand(json: JSONObject) {
         val douyinTailTag = json.optString("douyinTailTag")
-        val douyinContentTemplate = json.optString("douyinContentTemplate")
         if (douyinTailTag.isNotBlank()) {
             DouyinPublisher.tailTag = douyinTailTag
             Log.d(TAG, "已更新抖音 tailTag: $douyinTailTag")
-        }
-        if (douyinContentTemplate.isNotBlank()) {
-            DouyinPublisher.contentTemplate = douyinContentTemplate
-            Log.d(TAG, "已更新抖音 contentTemplate")
         }
         sendAck("publish_douyin_received")
         CoroutineWrapper.launch(isMain = true) {
@@ -228,11 +223,6 @@ object ControlPanelBridge {
     }
 
     private fun handleKuaishouPublishCommand(json: JSONObject) {
-        val kuaishouContentTemplate = json.optString("kuaishouContentTemplate")
-        if (kuaishouContentTemplate.isNotBlank()) {
-            KuaishouPublisher.contentTemplate = kuaishouContentTemplate
-            Log.d(TAG, "已更新快手 contentTemplate")
-        }
         sendAck("publish_kuaishou_received")
         CoroutineWrapper.launch(isMain = true) {
             runCatching {

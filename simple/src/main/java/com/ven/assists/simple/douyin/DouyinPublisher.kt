@@ -25,7 +25,7 @@ typealias DouyinContext = WeiboPublisher.Context
  * 抖音自动化发布流程（预留架子，后续逐步补全）
  */
 object DouyinPublisher {
-    private const val SERVER_BASE_URL = "http://192.168.210.192:4001"
+    private const val SERVER_BASE_URL = "http://192.168.8.192:4001"
     
     /**
      * 抖音文案模板列表，可在外部进行配置
@@ -863,9 +863,9 @@ object DouyinPublisher {
         val beforeLength = beforeText.length
         log("粘贴前输入框文本长度: $beforeLength")
 
-        // 话题标签输入框只需要填充标签
-        val fullContent = tailTag
-        log("准备填充话题标签: $fullContent")
+        // 话题标签输入框需要填充文案内容 + 标签
+        val fullContent = "$currentContentTemplate $tailTag"
+        log("准备填充话题标签: ${fullContent.take(50)}...")
 
         log("步骤3: 执行粘贴操作")
         var pasteAttempted = false

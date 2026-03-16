@@ -31,8 +31,8 @@ import java.util.concurrent.TimeUnit
 object ControlPanelBridge {
     private const val TAG = "ControlPanelBridge"
     private const val HEARTBEAT_INTERVAL = 10_000L
-    private const val SERVER_BASE_URL = "http://192.168.89.192:4001"
-    private const val WS_URL = "ws://192.168.89.192:4001/ws"
+    private const val SERVER_BASE_URL = "http://192.168.136.192:4001"
+    private const val WS_URL = "ws://192.168.136.192:4001/ws"
 
     private val okHttpClient = OkHttpClient.Builder()
         .pingInterval(HEARTBEAT_INTERVAL, TimeUnit.MILLISECONDS)

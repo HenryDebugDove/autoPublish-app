@@ -50,7 +50,7 @@ import java.util.UUID
  */
 object WeiboPublisher {
 
-    private const val SERVER_BASE_URL = "http://192.168.89.192:4001"
+    private const val SERVER_BASE_URL = "http://192.168.136.192:4001"
 
     /**
      * 微博文案尾部标签，可在外部进行配置。

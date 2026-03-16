@@ -485,7 +485,7 @@ object AssistsWindowManager {
     }
 
     /**
-     * 设置浮窗包装器为不可触摸状态
+     * 设置浮窗包装器为不可触摸状态 ，
      */
     suspend fun ViewWrapper.nonTouchableByWrapper() {
         layoutParams.nonTouchableByLayoutParams()

@@ -25,7 +25,7 @@ typealias DouyinContext = WeiboPublisher.Context
  * 抖音自动化发布流程（预留架子，后续逐步补全）
  */
 object DouyinPublisher {
-    private const val SERVER_BASE_URL = "http://192.168.89.192:4001"
+    private const val SERVER_BASE_URL = "http://192.168.136.192:4001"
     
     /**
      * 抖音文案模板列表，可在外部进行配置

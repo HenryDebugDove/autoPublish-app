@@ -28,7 +28,7 @@ typealias KuaishouContext = WeiboPublisher.Context
  * 快手自动化发布流程（预留架子，后续逐步补全）
  */
 object KuaishouPublisher {
-    private const val SERVER_BASE_URL = "http://192.168.89.192:4001"
+    private const val SERVER_BASE_URL = "http://192.168.136.192:4001"
     
     /**
      * 当前发布的文案内容（由循环中临时设置）

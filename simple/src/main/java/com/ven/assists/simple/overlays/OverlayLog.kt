@@ -74,14 +74,14 @@ object OverlayLog : AssistsServiceListener {
             viewBinding?.let {
                 if (field == null) {
                     field = AssistsWindowWrapper(it.root, wmLayoutParams = AssistsWindowManager.createLayoutParams().apply {
-                        width = (ScreenUtils.getScreenWidth() * 0.8).toInt()
-                        height = (ScreenUtils.getScreenHeight() * 0.5).toInt()
+                        width = (ScreenUtils.getScreenWidth() * 0.62).toInt()
+                        height = (ScreenUtils.getScreenHeight() * 0.36).toInt()
                     }, onClose = {
                         hide()
                         onClose?.invoke(it)
                     }).apply {
-                        minWidth = (ScreenUtils.getScreenWidth() * 0.6).toInt()
-                        minHeight = (ScreenUtils.getScreenHeight() * 0.4).toInt()
+                        minWidth = (ScreenUtils.getScreenWidth() * 0.48).toInt()
+                        minHeight = (ScreenUtils.getScreenHeight() * 0.28).toInt()
                         initialCenter = true
                         viewBinding.tvTitle.text = "日志"
                     }

@@ -8,12 +8,15 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
+import android.accessibilityservice.AccessibilityService
+import com.blankj.utilcode.util.LogUtils
 import com.blankj.utilcode.util.SizeUtils
 import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.databinding.FloatingQuickBallBinding
 import com.ven.assists.simple.douyin.DouyinPublisher
 import com.ven.assists.simple.kuaishou.KuaishouPublisher
 import com.ven.assists.simple.overlays.OverlayBasic
+import com.ven.assists.simple.xianyu.XianyuBatchRunner
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.utils.CoroutineWrapper
 import com.ven.assists.window.AssistsWindowManager
@@ -31,7 +34,16 @@ object FloatingQuickBallController {
 
     fun show() {
         if (binding != null) return
-        val service = AssistsService.instance ?: return
+        val service = AssistsService.instance ?: run {
+            LogUtils.w(TAG, "悬浮球未显示：AssistsService.instance 为 null（请在本应用的无障碍列表里打开服务，且不要只开系统「无障碍总开关」）")
+            return
+        }
+        // AssistsWindowManager 仅在 onServiceConnected 里 init；若 show 早于该回调会 lateinit 崩溃，这里补一次 init
+        runCatching {
+            AssistsWindowManager.init(service as AccessibilityService)
+        }.onFailure {
+            LogUtils.e(TAG, "AssistsWindowManager.init 失败: ${it.message}")
+        }
         val inflater = LayoutInflater.from(service)
         binding = FloatingQuickBallBinding.inflate(inflater).apply {
             btnBall.setOnClickListener { toggleMenu() }
@@ -56,6 +68,13 @@ object FloatingQuickBallController {
                     KuaishouPublisher.publish(OverlayBasic.createWeiboAutomationContext())
                 }
             }
+
+            btnXianyuQuick.setOnClickListener {
+                toggleMenu(false)
+                CoroutineWrapper.launch(isMain = true) {
+                    XianyuBatchRunner.run(XianyuBatchRunner.createLogOnlyContext())
+                }
+            }
         }
         val params = WindowManager.LayoutParams().apply {
             width = WindowManager.LayoutParams.WRAP_CONTENT
@@ -69,8 +88,20 @@ object FloatingQuickBallController {
             x = SizeUtils.dp2px(8f)
             y = 0
         }
-        viewWrapper = AssistsWindowManager.add(binding?.root, params, isStack = true, isTouchable = true)
+        runCatching {
+            viewWrapper = AssistsWindowManager.add(binding?.root, params, isStack = true, isTouchable = true)
+            if (viewWrapper == null) {
+                LogUtils.e(TAG, "悬浮球：AssistsWindowManager.add 返回 null")
+            } else {
+                LogUtils.i(TAG, "悬浮球已显示")
+            }
+        }.onFailure { e ->
+            LogUtils.e(TAG, "悬浮球 addView 失败: ${e.message}", e)
+            binding = null
+        }
     }
+
+    private const val TAG = "FloatingQuickBall"
 
     fun hide() {
         binding?.root?.let { AssistsWindowManager.removeWindow(it) }

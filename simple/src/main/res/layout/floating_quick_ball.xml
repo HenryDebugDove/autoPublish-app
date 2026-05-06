@@ -48,6 +48,17 @@
             android:text="快手"
             android:textColor="@android:color/white"
             android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/btnXianyuQuick"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:paddingHorizontal="12dp"
+            android:paddingVertical="8dp"
+            android:text="闲鱼"
+            android:textColor="@android:color/white"
+            android:textSize="14sp" />
     </LinearLayout>
 
     <ImageView

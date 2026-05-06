@@ -47,8 +47,9 @@ class App : Application() {
         // 注册悬浮球监听器，使其在服务连接时自动显示
         AssistsService.listeners.add(quickBallListener)
         // 延迟检查服务是否已连接，如果已连接则显示悬浮球
-        CoroutineWrapper.launch {
-            delay(500) // 等待服务初始化
+        // 主线程延迟显示，避免在 IO 线程操作 WindowManager；与 onServiceConnected 中的 show 互补
+        CoroutineWrapper.launch(isMain = true) {
+            delay(800)
             if (AssistsService.instance != null) {
                 FloatingQuickBallController.show()
             }

@@ -639,6 +639,14 @@ object OverlayBasic : AssistsServiceListener {
         )
     }
 
+    /**
+     * 短时居中 overlayToast + 写入 [LogWrapper]，由 [OverlayLog] 日志浮窗滚动展示（与「浮窗级别Toast」按钮同款链路）。
+     */
+    fun overlayAutomationLog(message: String, logTag: String = "自动化") {
+        message.overlayToast()
+        LogWrapper.logAppend("[$logTag] $message")
+    }
+
     fun hide() {
         AssistsWindowManager.removeView(assistWindowWrapper?.getView())
     }
@@ -1109,8 +1117,7 @@ object OverlayBasic : AssistsServiceListener {
     }
 
     private fun overlayLogging(message: String) {
-        message.overlayToast()
-        LogWrapper.logAppend("[OverlayBasic] $message")
+        overlayAutomationLog(message, "OverlayBasic")
     }
 
     /**

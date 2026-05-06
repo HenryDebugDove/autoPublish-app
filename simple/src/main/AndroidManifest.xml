@@ -28,6 +28,19 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 工具类：完整枚举已安装包（与 <queries> 配合，避免部分机型应用列表被截断） -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <!-- Android 11+：可见性；显式声明闲鱼包名，避免部分系统不返回该包 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="com.taobao.idlefish" />
+    </queries>
 
     <application
         android:name="com.ven.assists.simple.App"

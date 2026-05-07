@@ -10,6 +10,7 @@ import com.ven.assists.AssistsCore.gestureClick
 import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
+import com.ven.assists.simple.AutomationLog
 import com.ven.assists.simple.weibo.WeiboPublisher
 
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +88,7 @@ object KuaishouPublisher {
     }
 
     suspend fun publish(context: KuaishouContext) = with(context) {
+        AutomationLog.startLongRunningAutomation()
         // 启动时优先从控制面板后端获取文案列表
         val remoteConfig = fetchRemoteConfig(log)
         if (remoteConfig == null) {
@@ -104,6 +106,10 @@ object KuaishouPublisher {
         
         // 循环发布每条文案
         remoteConfig.kuaishouContentTemplates.forEachIndexed { index, contentTemplate ->
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 已停止，结束快手发布任务")
+                return@with
+            }
             log("========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
             log("文案内容: ${contentTemplate.take(50)}...")
             
@@ -121,8 +127,8 @@ object KuaishouPublisher {
             
             // 如果不是最后一条，等待30秒后继续下一条
             if (index < totalCount - 1) {
-                log("等待 30 秒后发布下一条文案...")
-                delay(30000)
+                log("等待 30 秒后发布下一条文案…（日志浮窗可停止或音量加中断）")
+                AutomationLog.waitUnlessStopped(30_000L)
             }
         }
         
@@ -133,6 +139,10 @@ object KuaishouPublisher {
      * 单次发布流程
      */
     private suspend fun publishSingle(context: KuaishouContext): Boolean = with(context) {
+        if (AutomationLog.shouldStop()) {
+            log("⚠️ 已停止，跳过本条")
+            return@with false
+        }
         log("🚧 快手自动化发布流程（阶段一：点击底部加号）")
         if (clickBottomAddButton()) {
             log("✅ 已点击底部加号按钮")

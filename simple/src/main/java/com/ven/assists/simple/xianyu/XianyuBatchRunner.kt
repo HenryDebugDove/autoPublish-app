@@ -19,11 +19,10 @@ import com.ven.assists.AssistsCore.getBoundsInScreen
 import com.ven.assists.AssistsCore.getAllNodes
 import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.service.AssistsService
+import com.ven.assists.simple.AutomationLog
 import com.ven.assists.simple.common.LogWrapper
-import com.ven.assists.simple.overlays.OverlayLog
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.stepper.StepManager
-import com.ven.assists.utils.runMain
 import kotlinx.coroutines.yield
 import java.text.Normalizer
 import java.util.Collections
@@ -44,7 +43,7 @@ import java.util.Collections
  *    节点 `packageName` 为空或含 `idlefish`，`content-desc` 经 NFKC 与空白规整后等于「通知消息」，且 bounds 宽高大于 0。
  *
  * ## 使用方法
- * - 调用 `run(createLogOnlyContext())`：`log` 写入 [LogWrapper]，任务开始时会 `OverlayLog.show()` 显示滚动日志。
+ * - 调用 `run(createLogOnlyContext())`：`log` 写入 [LogWrapper]；任务开始时 [AutomationLog.startLongRunningAutomation] 显示日志浮窗。
  * - 悬浮球入口示例：`CoroutineWrapper.launch(isMain = true) { XianyuBatchRunner.run(XianyuBatchRunner.createLogOnlyContext()) }`
  * - 可调参数：文件内 `LAUNCH_*`、`PER_STRATEGY_*`、`CLICK_RETRY`、黑名单与 [PACKAGE_MATCH_HINTS] 等。
  * - 停止：日志浮窗「停止」、[com.ven.assists.simple.AutomationStop]、音量加键均会置 [StepManager.isStop] 并 `requestStop()`。
@@ -110,8 +109,7 @@ object XianyuBatchRunner {
      */
     suspend fun run(context: WeiboPublisher.Context) = with(context) {
         stopRequested = false
-        StepManager.isStop = false
-        runMain { OverlayLog.show() }
+        AutomationLog.startLongRunningAutomation()
         val apps = collectXianyuApps()
         if (apps.isEmpty()) {
             log("❌ 未找到应用名包含「闲鱼」的包（已放宽与 Hamibot 一致的枚举方式，仍为空请看下一条日志）。")

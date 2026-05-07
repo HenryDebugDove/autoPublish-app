@@ -1,0 +1,27 @@
+---
+description: 长耗时无障碍自动化 — 日志弹窗、停止与日志写法（对齐闲鱼/发布器）
+globs: simple/**/*.kt
+alwaysApply: false
+---
+
+# 日志弹窗与停止（自动化任务）
+
+## 何时必须做
+
+- 入口在 **悬浮球 / Overlay / 控制面板** 等、可能跑 **较久** 的脚本：任务开头调用 `AutomationLog.startLongRunningAutomation()`（显示 `OverlayLog` + 清 `StepManager.isStop`）。
+- **禁止**仅靠 `Toast`、`LogUtils`、或仅 `android.util.Log` 作为用户可见进度；进度应 **`LogWrapper.logAppend("[模块] …")`**（或 Context 的 `log`，其底层同样应写入 `LogWrapper`），以便 `OverlayLog` 展示。
+- 长 **`delay`** 改为 **`AutomationLog.waitUnlessStopped(ms)`**，以便日志里点「停止」或 **音量加** 后能尽快退出。
+
+## 停止
+
+- 全局停止统一走 **`AutomationStop.requestStopAllScripts()`**（已由日志浮窗「停止」、音量加注册）。
+- 循环/阶段之间必须 **`if (AutomationLog.shouldStop()) return`**（或与模块内 `stopRequested` 组合，如闲鱼 `shouldAbort()`）。
+
+## 参考实现
+
+- `XianyuBatchRunner`：`createLogOnlyContext()` + `OverlayLog.show` + `shouldAbort()`。
+- `AutomationLog` / `AutomationStop`：`simple/.../AutomationLog.kt`、`AutomationStop.kt`。
+
+## 微博/抖音/快手 Context
+
+- `OverlayBasic.createWeiboAutomationContext()` 的 `log` 应 **只写 `LogWrapper`**（长任务避免每条 `overlayToast` 刷屏）；点击特效可保留。

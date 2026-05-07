@@ -654,7 +654,7 @@ object OverlayBasic : AssistsServiceListener {
     fun createWeiboAutomationContext(): WeiboPublisher.Context {
         return WeiboPublisher.Context(
             log = { message ->
-                overlayLogging(message)
+                LogWrapper.logAppend("[自动] $message")
             },
             showNodeEffect = { node, label ->
                 showClickEffect(node, label)

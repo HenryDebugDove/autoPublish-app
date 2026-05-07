@@ -10,6 +10,7 @@ import com.ven.assists.AssistsCore.gestureClick
 import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
+import com.ven.assists.simple.AutomationLog
 import com.ven.assists.simple.weibo.WeiboPublisher
 
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +98,7 @@ object DouyinPublisher {
     }
 
     suspend fun publish(context: DouyinContext) = with(context) {
+        AutomationLog.startLongRunningAutomation()
         // 启动时优先从控制面板后端获取 tailTag 和 contentTemplates
         val remoteConfig = fetchRemoteConfig(log)
         if (remoteConfig == null) {
@@ -119,6 +121,10 @@ object DouyinPublisher {
         
         // 直接使用接口返回的 douyinContentTemplates 数组进行遍历
         remoteConfig.douyinContentTemplates.forEachIndexed { index, contentTemplate ->
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 已停止，结束抖音发布任务")
+                return@with
+            }
             log("\n========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
             log("文案内容: ${contentTemplate.take(50)}...")
             
@@ -136,8 +142,8 @@ object DouyinPublisher {
             
             // 如果不是最后一条，等待 30 秒
             if (index < totalCount - 1) {
-                log("⏳ 等待 30 秒后发布下一条文案...")
-                delay(30000)
+                log("⏳ 等待 30 秒后发布下一条文案…（日志浮窗可停止或音量加中断）")
+                AutomationLog.waitUnlessStopped(30_000L)
             }
         }
         
@@ -151,6 +157,10 @@ object DouyinPublisher {
      * 执行单次抖音发布流程
      */
     private suspend fun publishSingle(context: DouyinContext): Boolean = with(context) {
+        if (AutomationLog.shouldStop()) {
+            log("⚠️ 已停止，跳过本条")
+            return@with false
+        }
         log("🚧 抖音自动化发布流程（阶段一：点击底部+号）")
         if (clickBottomAddButton()) {
             log("✅ 已点击底部加号按钮")

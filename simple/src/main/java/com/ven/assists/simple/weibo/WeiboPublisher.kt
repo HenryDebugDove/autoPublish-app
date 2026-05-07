@@ -26,6 +26,7 @@ import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.service.AssistsService
+import com.ven.assists.simple.AutomationLog
 
 import com.ven.assists.utils.FileDownloadUtil
 import com.ven.assists.utils.FileDownloadUtil.DownloadResult
@@ -170,6 +171,7 @@ object WeiboPublisher {
     }
 
     suspend fun publish(context: Context) = with(context) {
+        AutomationLog.startLongRunningAutomation()
         // 启动时优先从控制面板后端获取 tailTag 和文案列表
         val remoteConfig = fetchRemoteConfig(log)
         if (remoteConfig == null) {
@@ -205,6 +207,10 @@ object WeiboPublisher {
         
         // 循环发布每条文案
         remoteConfig.contentTemplates.forEachIndexed { index, contentTemplate ->
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 已停止，结束发布任务")
+                return@with
+            }
             log("========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
             log("文案内容: ${contentTemplate.take(50)}...")
             
@@ -222,8 +228,8 @@ object WeiboPublisher {
             
             // 如果不是最后一条，等待30秒后继续下一条
             if (index < totalCount - 1) {
-                log("等待 20 秒后发布下一条文案...")
-                delay(20000)
+                log("等待 20 秒后发布下一条文案…（可随时在日志浮窗点停止或按音量加中断）")
+                AutomationLog.waitUnlessStopped(20_000L)
             }
         }
         
@@ -234,6 +240,10 @@ object WeiboPublisher {
      * 单次发布流程
      */
     private suspend fun publishSingle(context: Context): Boolean = with(context) {
+        if (AutomationLog.shouldStop()) {
+            log("⚠️ 已停止，跳过本条")
+            return false
+        }
         if (!prepareWeiboAlbumImages(log)) {
             log("❌ 初始化微博素材图片失败")
             return false

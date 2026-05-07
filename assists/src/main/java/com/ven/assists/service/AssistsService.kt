@@ -2,6 +2,7 @@ package com.ven.assists.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.blankj.utilcode.util.LogUtils
 import com.ven.assists.AssistsCore
@@ -33,6 +34,12 @@ open class AssistsService : AccessibilityService() {
          * 用于分发服务生命周期和无障碍事件
          */
         val listeners: MutableList<AssistsServiceListener> = Collections.synchronizedList(arrayListOf<AssistsServiceListener>())
+
+        /**
+         * 音量加等全局停止时由应用模块在启动时赋值。
+         */
+        @JvmField
+        var onRequestStopAllScripts: (() -> Unit)? = null
 
 //        val onAccessibilityEventFlow =
 //            MutableSharedFlow<AccessibilityEvent>(replay = 0, extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -90,5 +97,12 @@ open class AssistsService : AccessibilityService() {
      */
     override fun onInterrupt() {
         runCatching { listeners.forEach { it.onInterrupt() } }
+    }
+
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN && event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            onRequestStopAllScripts?.invoke()
+        }
+        return super.onKeyEvent(event)
     }
 }

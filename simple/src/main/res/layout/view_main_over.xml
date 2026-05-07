@@ -31,6 +31,7 @@
                     android:orientation="vertical">
 
 
+                    <!-- 开启引导示例入口已注释，与 SettingGuideActivity 一并停用
                     <Button
                         android:id="@+id/btn_setting_guide"
                         android:layout_width="match_parent"
@@ -38,6 +39,7 @@
                         android:backgroundTint="@color/colorAccent"
                         android:text="无障碍服务开启引导示例"
                         android:textColor="@color/colorPrimary" />
+                    -->
 
                     <Button
                         android:id="@+id/btn_notification"

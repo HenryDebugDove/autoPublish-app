@@ -12,7 +12,7 @@ import com.ven.assists.window.AssistsWindowManager
 import com.ven.assists.window.AssistsWindowWrapper
 import com.ven.assists.simple.common.LogWrapper
 import com.ven.assists.simple.databinding.LogOverlayBinding
-import com.ven.assists.stepper.StepManager
+import com.ven.assists.simple.AutomationStop
 import com.ven.assists.utils.CoroutineWrapper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,7 +50,7 @@ object OverlayLog : AssistsServiceListener {
                     btnClean.setOnClickListener {
                         CoroutineWrapper.launch { LogWrapper.clearLog() }
                     }
-                    btnStop.setOnClickListener { StepManager.isStop = true }
+                    btnStop.setOnClickListener { AutomationStop.requestStopAllScripts() }
                 }
             }
             return field

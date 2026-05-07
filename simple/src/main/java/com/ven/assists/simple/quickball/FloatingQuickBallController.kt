@@ -33,6 +33,10 @@ object FloatingQuickBallController {
     private var isActionVisible = false
 
     fun show() {
+        if (!FloatingQuickBallPrefs.isQuickBallEnabled()) {
+            LogUtils.d(TAG, "悬浮球：设置中为关闭，不显示")
+            return
+        }
         if (binding != null) return
         val service = AssistsService.instance ?: run {
             LogUtils.w(TAG, "悬浮球未显示：AssistsService.instance 为 null（请在本应用的无障碍列表里打开服务，且不要只开系统「无障碍总开关」）")

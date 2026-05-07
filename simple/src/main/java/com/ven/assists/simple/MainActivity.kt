@@ -29,6 +29,7 @@ import com.ven.assists.simple.overlays.OverlayAdvanced
 import com.ven.assists.simple.overlays.OverlayBasic
 import com.ven.assists.simple.overlays.OverlayPro
 import com.ven.assists.simple.overlays.OverlayWeb
+import com.ven.assists.simple.overlays.OverlayXianyu
 import com.ven.assists.utils.ContactsUtil
 import com.ven.assists.utils.CoroutineWrapper
 import com.ven.assists.utils.NodeClassValue
@@ -44,7 +45,18 @@ class MainActivity : AppCompatActivity(), AssistsServiceListener {
         ActivityMainBinding.inflate(layoutInflater).apply {
             btnEnable.setOnClickListener {
                 AssistsCore.openAccessibilitySetting()
-                startActivity(Intent(this@MainActivity, SettingGuideActivity::class.java))
+                // 已关闭「Assists 开启引导」全屏提示页，不再跳转 SettingGuideActivity
+                // startActivity(Intent(this@MainActivity, SettingGuideActivity::class.java))
+            }
+            btnXianyu.setOnClickListener {
+                OverlayXianyu.onClose = {
+                    OverlayXianyu.hide()
+                }
+                if (OverlayXianyu.showed) {
+                    OverlayXianyu.hide()
+                } else {
+                    OverlayXianyu.show()
+                }
             }
             btnBasic.setOnClickListener {
                 OverlayBasic.onClose = {

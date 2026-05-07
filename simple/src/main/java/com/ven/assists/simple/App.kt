@@ -7,6 +7,7 @@ import com.ven.assists.service.AssistsService
 import com.ven.assists.service.AssistsServiceListener
 import com.ven.assists.simple.control.ControlPanelBridge
 import com.ven.assists.simple.quickball.FloatingQuickBallController
+import com.ven.assists.simple.quickball.FloatingQuickBallPrefs
 import com.ven.assists.simple.step.GestureBottomTab
 import com.ven.assists.simple.step.GestureScrollSocial
 import com.ven.assists.simple.step.OpenWechatSocial
@@ -24,8 +25,9 @@ class App : Application() {
 
     private val quickBallListener = object : AssistsServiceListener {
         override fun onServiceConnected(service: AssistsService) {
-            // 服务连接时显示悬浮球
-            FloatingQuickBallController.show()
+            if (FloatingQuickBallPrefs.isQuickBallEnabled()) {
+                FloatingQuickBallController.show()
+            }
         }
 
         override fun onUnbind() {
@@ -42,6 +44,7 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         Utils.init(this)
+        AssistsService.onRequestStopAllScripts = { AutomationStop.requestStopAllScripts() }
         //设置全局步骤默认间隔时长
         StepManager.DEFAULT_STEP_DELAY = 1000L
         // 注册悬浮球监听器，使其在服务连接时自动显示
@@ -50,7 +53,7 @@ class App : Application() {
         // 主线程延迟显示，避免在 IO 线程操作 WindowManager；与 onServiceConnected 中的 show 互补
         CoroutineWrapper.launch(isMain = true) {
             delay(800)
-            if (AssistsService.instance != null) {
+            if (AssistsService.instance != null && FloatingQuickBallPrefs.isQuickBallEnabled()) {
                 FloatingQuickBallController.show()
             }
         }

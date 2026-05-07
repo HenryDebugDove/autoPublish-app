@@ -16,6 +16,7 @@ import android.text.TextUtils
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
+import android.widget.CompoundButton
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.AlphaAnimation
 import android.view.animation.Animation
@@ -52,6 +53,8 @@ import com.ven.assists.simple.ScreenshotReviewActivity
 import com.ven.assists.simple.TestActivity
 import com.ven.assists.simple.common.LogWrapper
 import com.ven.assists.simple.databinding.BasicOverlayBinding
+import com.ven.assists.simple.quickball.FloatingQuickBallController
+import com.ven.assists.simple.quickball.FloatingQuickBallPrefs
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.utils.AudioPlayerUtil
 import com.ven.assists.utils.CoroutineWrapper
@@ -62,6 +65,23 @@ import rkr.simplekeyboard.inputmethod.latin.inputlogic.InputLogic
 import java.io.File
 
 object OverlayBasic : AssistsServiceListener {
+
+    private val onFloatingQuickBallSwitchChanged = CompoundButton.OnCheckedChangeListener { _, checked ->
+        FloatingQuickBallPrefs.setQuickBallEnabled(checked)
+        if (checked) FloatingQuickBallController.show()
+        else FloatingQuickBallController.hide()
+    }
+
+    private fun syncFloatingQuickBallSwitchUi() {
+        viewBinding?.checkboxFloatingQuickBall?.apply {
+            val want = FloatingQuickBallPrefs.isQuickBallEnabled()
+            if (isChecked != want) {
+                setOnCheckedChangeListener(null)
+                isChecked = want
+                setOnCheckedChangeListener(onFloatingQuickBallSwitchChanged)
+            }
+        }
+    }
 
     @SuppressLint("StaticFieldLeak")
     var viewBinding: BasicOverlayBinding? = null
@@ -575,6 +595,10 @@ object OverlayBasic : AssistsServiceListener {
                     btnToast.setOnClickListener {
                         "这是浮窗级别Toast：${TimeUtils.getNowString()}".overlayToast(delay = 3000)
                     }
+                    checkboxFloatingQuickBall.apply {
+                        isChecked = FloatingQuickBallPrefs.isQuickBallEnabled()
+                        setOnCheckedChangeListener(onFloatingQuickBallSwitchChanged)
+                    }
                 }
             }
             return field
@@ -618,7 +642,9 @@ object OverlayBasic : AssistsServiceListener {
         if (!AssistsService.listeners.contains(this)) {
             AssistsService.listeners.add(this)
         }
-        AssistsWindowManager.add(assistWindowWrapper)
+        val wrapper = assistWindowWrapper
+        syncFloatingQuickBallSwitchUi()
+        AssistsWindowManager.add(wrapper)
     }
 
     /**

@@ -22,6 +22,7 @@ import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.common.LogWrapper
 import com.ven.assists.simple.overlays.OverlayLog
 import com.ven.assists.simple.weibo.WeiboPublisher
+import com.ven.assists.stepper.StepManager
 import com.ven.assists.utils.runMain
 import kotlinx.coroutines.yield
 import java.text.Normalizer
@@ -45,7 +46,8 @@ import java.util.Collections
  * ## 使用方法
  * - 调用 `run(createLogOnlyContext())`：`log` 写入 [LogWrapper]，任务开始时会 `OverlayLog.show()` 显示滚动日志。
  * - 悬浮球入口示例：`CoroutineWrapper.launch(isMain = true) { XianyuBatchRunner.run(XianyuBatchRunner.createLogOnlyContext()) }`
- * - 可调参数：文件内 `LAUNCH_*`、`PER_STRATEGY_*`、`CLICK_RETRY`、黑名单与 [PACKAGE_MATCH_HINTS] 等；停止可 `requestStop()`。
+ * - 可调参数：文件内 `LAUNCH_*`、`PER_STRATEGY_*`、`CLICK_RETRY`、黑名单与 [PACKAGE_MATCH_HINTS] 等。
+ * - 停止：日志浮窗「停止」、[com.ven.assists.simple.AutomationStop]、音量加键均会置 [StepManager.isStop] 并 `requestStop()`。
  */
 object XianyuBatchRunner {
 
@@ -88,6 +90,8 @@ object XianyuBatchRunner {
         stopRequested = true
     }
 
+    private fun shouldAbort(): Boolean = stopRequested || StepManager.isStop
+
     /**
      * 仅日志浮窗：[LogWrapper] + [OverlayLog]，无点击特效（减轻干扰）。
      */
@@ -106,6 +110,7 @@ object XianyuBatchRunner {
      */
     suspend fun run(context: WeiboPublisher.Context) = with(context) {
         stopRequested = false
+        StepManager.isStop = false
         runMain { OverlayLog.show() }
         val apps = collectXianyuApps()
         if (apps.isEmpty()) {
@@ -116,7 +121,7 @@ object XianyuBatchRunner {
         }
         log("发现匹配应用数量(过滤黑名单后): ${apps.size}")
         for ((index, item) in apps.withIndex()) {
-            if (stopRequested) {
+            if (shouldAbort()) {
                 log("⚠️ 已请求停止，结束任务。")
                 return@with
             }
@@ -129,7 +134,7 @@ object XianyuBatchRunner {
                 log("⚠️ 启动或进入前台超时，跳过: ${item.packageName}")
                 continue
             }
-            if (stopRequested) {
+            if (shouldAbort()) {
                 log("⚠️ 已请求停止，结束任务。")
                 return@with
             }
@@ -143,7 +148,7 @@ object XianyuBatchRunner {
                 yield()
             }
         }
-        if (!stopRequested) {
+        if (!shouldAbort()) {
             log("🎉 闲鱼批量任务全部处理完成。")
         }
     }
@@ -320,7 +325,7 @@ object XianyuBatchRunner {
         val start = System.currentTimeMillis()
         var ok = false
         while (System.currentTimeMillis() - start < LAUNCH_WAIT_MAX_MS) {
-            if (stopRequested) return false
+            if (shouldAbort()) return false
             val cur = AssistsCore.getPackageName()
             if (cur == item.packageName || packageLooksLikeXianyuForeground(cur)) {
                 ok = true
@@ -339,7 +344,7 @@ object XianyuBatchRunner {
 
     private suspend fun waitForAccessibilityTreeNonEmpty(ctx: WeiboPublisher.Context) {
         val end = System.currentTimeMillis() + TREE_READY_MAX_MS
-        while (System.currentTimeMillis() < end && !stopRequested) {
+        while (System.currentTimeMillis() < end && !shouldAbort()) {
             if (getAllNodes().isNotEmpty()) return
             yield()
         }
@@ -412,7 +417,7 @@ object XianyuBatchRunner {
 
     private suspend fun waitNotificationMessageUi(ctx: WeiboPublisher.Context, maxMs: Long): Boolean {
         val end = System.currentTimeMillis() + maxMs
-        while (System.currentTimeMillis() < end && !stopRequested) {
+        while (System.currentTimeMillis() < end && !shouldAbort()) {
             if (isNotificationMessageSuccess()) {
                 ctx.log("✅ 已检测到「通知消息」节点（仅检测，未点击该节点）")
                 return true
@@ -476,7 +481,7 @@ object XianyuBatchRunner {
     private suspend fun openMessage(ctx: WeiboPublisher.Context): Boolean {
         val slice = PER_STRATEGY_SUCCESS_WAIT_MS
         repeat(CLICK_RETRY) { attempt ->
-            if (stopRequested) return false
+            if (shouldAbort()) return false
             ctx.log("──────── 进入消息 第 ${attempt + 1}/$CLICK_RETRY 轮 ────────")
 
             val tab = findIdlefishMessageTabNode()

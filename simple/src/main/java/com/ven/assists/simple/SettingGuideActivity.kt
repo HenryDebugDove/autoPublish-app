@@ -1,19 +1,18 @@
 package com.ven.assists.simple
 
-import android.graphics.Color
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
-import com.blankj.utilcode.util.BarUtils
-import com.ven.assists.simple.databinding.SettingGuideBinding
-import com.ven.assists.utils.CoroutineWrapper
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
 
+/**
+ * 原「无障碍开启引导」全屏页；入口 logic 已在 [MainActivity] 注释。
+ * 保留 Activity 仅占位 Manifest，避免外部仍传入 Intent 时白屏。
+ */
 class SettingGuideActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        BarUtils.setStatusBarColor(this, Color.TRANSPARENT)
+        /*
+        android.graphics.Color (BarUtils)
+        BarUtils.setStatusBarColor(this, android.graphics.Color.TRANSPARENT)
         CoroutineWrapper.launch {
             delay(500)
             withContext(Dispatchers.Main) {
@@ -25,5 +24,7 @@ class SettingGuideActivity : AppCompatActivity() {
                 }
             }
         }
+        */
+        finish()
     }
 }

@@ -54,7 +54,7 @@ object XianyuBatchRunner {
     /** 每种点击策略派发后的短时等待窗口，未出现「通知消息」则立刻换下一策略 */
     private const val PER_STRATEGY_SUCCESS_WAIT_MS = 1_100L
     private const val TREE_READY_MAX_MS = 8_000L
-    private const val CLICK_RETRY = 5
+    private const val CLICK_RETRY = 2
 
     private const val IDLEFISH_PKG = "com.taobao.idlefish"
     private const val IDLEFISH_MESSAGE_TAB_VIEW_ID = "com.taobao.idlefish:id/tab_title"

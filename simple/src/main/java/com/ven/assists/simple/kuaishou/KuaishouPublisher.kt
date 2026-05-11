@@ -1,5 +1,6 @@
 package com.ven.assists.simple.kuaishou
 
+import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
 import com.ven.assists.AssistsCore
 import com.ven.assists.AssistsCore.findByTags
@@ -452,34 +453,56 @@ object KuaishouPublisher {
     }
 
     /**
-     * 查找快手文案输入框（RelativeLayout 下的 EditText，text="写下你的心情"，resourceId="com.smile.gifmakerid/story_text"）
+     * 查找快手文案输入框（EditText，hint/文案含「写下你的心情」，resourceId 常见为 com.smile.gifmaker:id/story_text）
      */
     private fun findKuaishouTextEdit(): AccessibilityNodeInfo? {
-        // 优先根据 resource-id 精确匹配
-        AssistsCore.findByTags("android.widget.RelativeLayout").forEach { relativeLayout ->
-            relativeLayout.findByTags("android.widget.EditText").forEach { editText ->
-                val resId = editText.viewIdResourceName.orEmpty()
-                val text = editText.text?.toString().orEmpty()
-                if (resId == "com.smile.gifmakerid/story_text" || text.contains("写下你的心情")) {
-                    return editText
-                }
-            }
-        }
-        
-        // 回退方案：直接查找所有 EditText，匹配 resource-id 或 text
-        AssistsCore.findByTags("android.widget.EditText").forEach { editText ->
+        fun matchesStoryEdit(editText: AccessibilityNodeInfo): Boolean {
             val resId = editText.viewIdResourceName.orEmpty()
             val text = editText.text?.toString().orEmpty()
-            if (resId == "com.smile.gifmakerid/story_text" || text.contains("写下你的心情")) {
-                return editText
+            val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                editText.hintText?.toString().orEmpty()
+            } else {
+                ""
+            }
+            val placeholderHit = text.contains("写下你的心情") || hint.contains("写下你的心情")
+            val idHit = resId == "com.smile.gifmaker:id/story_text" ||
+                resId == "com.smile.gifmakerid/story_text" ||
+                resId.endsWith(":id/story_text") ||
+                resId.contains("story_text")
+            return idHit || placeholderHit
+        }
+
+        AssistsCore.findByTags("android.widget.RelativeLayout").forEach { relativeLayout ->
+            relativeLayout.findByTags("android.widget.EditText").forEach { editText ->
+                if (matchesStoryEdit(editText)) return editText
             }
         }
-        
+
+        AssistsCore.findByTags("android.widget.EditText").forEach { editText ->
+            if (matchesStoryEdit(editText)) return editText
+        }
+
         return null
     }
 
+    private fun kuaishouTextLooksFilled(before: String, after: String, target: String): Boolean {
+        if (target.isEmpty()) return false
+        if (after.length > before.length) return true
+        val sample = target.take(30.coerceAtMost(target.length))
+        return sample.isNotEmpty() && after.contains(sample)
+    }
+
     /**
-     * 填充快手文案内容（参考 DouyinPublisher 的填充策略）
+     * 复制内容到剪贴板（与 DouyinPublisher.fillDouyinTopicTags 一致，供 ACTION_PASTE / 长按菜单使用）
+     */
+    private fun copyToClipboard(text: String) {
+        val service = com.ven.assists.service.AssistsService.instance ?: return
+        val clipboard = service.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        clipboard?.setPrimaryClip(android.content.ClipData.newPlainText("kuaishou_content", text))
+    }
+
+    /**
+     * 填充快手文案内容（对齐 DouyinPublisher.fillDouyinTopicTags：多路粘贴 + 校验）
      */
     private suspend fun KuaishouContext.fillKuaishouTextContent(): Boolean {
         val edit = findKuaishouTextEdit() ?: run {
@@ -487,41 +510,124 @@ object KuaishouPublisher {
             return false
         }
 
-        val bounds = edit.getBoundsInScreen()
-        val cx = bounds.centerX().toFloat()
-        val cy = bounds.centerY().toFloat()
-
-        showClickEffect(cx, cy, "点击输入框获取焦点")
-        edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        delay(150)
-        AssistsCore.gestureClick(cx, cy)
-        delay(200)
-
         val target = currentContentTemplate
+        if (target.isBlank()) {
+            log("❌ 当前文案模板为空，无法填充")
+            return false
+        }
 
-        // 方案1：setNodeText
+        log("步骤1: 点击输入框获得焦点")
+        val bounds = edit.getBoundsInScreen()
+        val centerX = bounds.centerX().toFloat()
+        val centerY = bounds.centerY().toFloat()
+
+        showClickEffect(centerX, centerY, "点击快手文案输入框")
+        if (edit.isClickable) {
+            edit.click()
+        } else {
+            edit.findFirstParentClickable()?.click()
+        }
+        edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        AssistsCore.gestureClick(centerX, centerY)
+
+        log("等待输入框获得焦点并稳定...")
+        delay(800)
+
+        log("步骤2: 记录粘贴前的输入框状态")
+        val beforeText = if (edit.refresh()) edit.text?.toString() ?: "" else ""
+        val beforeLength = beforeText.length
+        log("粘贴前输入框文本长度: $beforeLength")
+
+        log("步骤3: 执行填充（setNodeText → paste → 剪贴板 ACTION_PASTE → 点「粘贴」）")
+        var pasteAttempted = false
+
+        log("方式1: 尝试 setNodeText")
         if (edit.refresh() && edit.setNodeText(target)) {
-            log("✅ 文案填充成功（setNodeText）")
+            log("✅ setNodeText 已执行")
+            pasteAttempted = true
+        } else {
+            log("方式2: setNodeText 失败，尝试 paste API")
+            if (edit.refresh()) {
+                edit.paste(target)
+                log("✅ paste API 已执行")
+                pasteAttempted = true
+            }
+        }
+
+        delay(500)
+        if (edit.refresh() && kuaishouTextLooksFilled(beforeText, edit.text?.toString() ?: "", target)) {
+            log("✅ 文案填充成功（setNodeText / paste）")
             return true
         }
 
-        // 方案2：paste API
-        if (edit.refresh()) {
-            edit.paste(target)
-            log("✅ 文案填充尝试（paste）")
-            delay(200)
-            return true
-        }
-
-        // 方案3：再次点击并长按粘贴（简单兜底）
-        AssistsCore.gestureClick(cx, cy, duration = 120)
+        log("方式3: 尝试剪贴板 + ACTION_PASTE")
+        copyToClipboard(target)
         delay(200)
-        if (edit.refresh() && edit.setNodeText(target)) {
-            log("✅ 文案填充成功（兜底 setNodeText）")
+        if (edit.refresh()) {
+            edit.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            delay(300)
+            val pasteOk = edit.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            log("ACTION_PASTE 执行结果: $pasteOk")
+            pasteAttempted = pasteAttempted || pasteOk
+        }
+
+        delay(500)
+        if (edit.refresh() && kuaishouTextLooksFilled(beforeText, edit.text?.toString() ?: "", target)) {
+            log("✅ 文案填充成功（ACTION_PASTE）")
             return true
         }
 
-        log("❌ 文案填充失败")
+        log("方式4: 尝试点击「粘贴」按钮")
+        delay(300)
+        var pasteButtonClicked = false
+        AssistsCore.findByText("粘贴").forEach { pasteButton ->
+            if (pasteButton.isClickable) {
+                showClickEffect(pasteButton, "点击粘贴按钮")
+                delay(100)
+                if (pasteButton.click() || pasteButton.findFirstParentClickable()?.click() == true) {
+                    pasteButtonClicked = true
+                    pasteAttempted = true
+                    return@forEach
+                }
+            }
+        }
+        if (!pasteButtonClicked) {
+            val b2 = edit.getBoundsInScreen()
+            val pasteX = b2.centerX().toFloat()
+            val pasteY = b2.bottom + 80f
+            showClickEffect(pasteX, pasteY, "坐标点击粘贴区域")
+            delay(100)
+            if (AssistsCore.gestureClick(pasteX, pasteY)) {
+                pasteAttempted = true
+            }
+        }
+
+        delay(600)
+        if (edit.refresh() && kuaishouTextLooksFilled(beforeText, edit.text?.toString() ?: "", target)) {
+            log("✅ 文案填充成功（粘贴菜单/坐标）")
+            return true
+        }
+
+        if (!pasteAttempted) {
+            log("⚠️ 未执行任何填充动作")
+        }
+
+        log("方式5: 长按输入框区域后再次 setNodeText")
+        AssistsCore.gestureClick(centerX, centerY, duration = 120)
+        delay(250)
+        if (edit.refresh() && edit.setNodeText(target)) {
+            delay(400)
+            if (edit.refresh() && kuaishouTextLooksFilled(beforeText, edit.text?.toString() ?: "", target)) {
+                log("✅ 文案填充成功（长按后 setNodeText）")
+                return true
+            }
+        }
+
+        if (edit.refresh()) {
+            val after = edit.text?.toString() ?: ""
+            log("粘贴后输入框文本长度: ${after.length}，预览: ${after.take(80)}")
+        }
+        log("❌ 文案填充失败（可检查无障碍是否允许读剪贴板/快手版本是否变更控件）")
         return false
     }
 

@@ -22,6 +22,15 @@
                 android:backgroundTint="@color/colorAccent"
                 android:text="闲鱼刷新信息"
                 android:textAllCaps="false" />
+
+            <Button
+                android:id="@+id/btn_xianyu_polish"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:backgroundTint="@color/colorAccent"
+                android:text="闲鱼擦亮"
+                android:textAllCaps="false" />
         </com.google.android.flexbox.FlexboxLayout>
     </androidx.core.widget.NestedScrollView>
 </FrameLayout>

@@ -10,10 +10,11 @@ import com.ven.assists.window.AssistsWindowManager
 import com.ven.assists.window.AssistsWindowWrapper
 import com.ven.assists.simple.databinding.XianyuOverlayBinding
 import com.ven.assists.simple.xianyu.XianyuBatchRunner
+import com.ven.assists.simple.xianyu.XianyuPolishRunner
 import com.ven.assists.utils.CoroutineWrapper
 
 /**
- * 主页「闲鱼」入口浮窗：内含「闲鱼刷新信息」（与悬浮小球同类批量逻辑）。
+ * 主页「闲鱼」入口浮窗：内含「闲鱼刷新信息」「闲鱼擦亮」等入口。
  */
 @SuppressLint("StaticFieldLeak")
 object OverlayXianyu : AssistsServiceListener {
@@ -29,6 +30,12 @@ object OverlayXianyu : AssistsServiceListener {
                         hide()
                         CoroutineWrapper.launch(isMain = true) {
                             XianyuBatchRunner.run(XianyuBatchRunner.createLogOnlyContext())
+                        }
+                    }
+                    btnXianyuPolish.setOnClickListener {
+                        hide()
+                        CoroutineWrapper.launch(isMain = true) {
+                            XianyuPolishRunner.run(XianyuPolishRunner.createLogOnlyContext())
                         }
                     }
                 }

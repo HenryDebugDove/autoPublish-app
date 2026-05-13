@@ -13,6 +13,7 @@ import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.simple.AutomationLog
 import com.ven.assists.simple.weibo.WeiboPublisher
+import com.blankj.utilcode.util.ScreenUtils
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -31,7 +32,20 @@ typealias KuaishouContext = WeiboPublisher.Context
  */
 object KuaishouPublisher {
     private const val SERVER_BASE_URL = "http://118.25.152.48:4001"
-    
+
+    /** 相机页「文字」tab：`mood_tab_tv` */
+    private const val MOOD_TAB_RESOURCE_ID = "com.smile.gifmaker:id/mood_tab_tv"
+
+    /**
+     * weditor rect `{"x":739,"y":2043,"width":216,"height":71}` 的中心（该机参考分辨率，像素兜底）
+     */
+    private const val MOOD_TAB_FIXED_CENTER_X = 847f
+    private const val MOOD_TAB_FIXED_CENTER_Y = 2078.5f
+
+    /** weditor 坐标比例（相对屏幕宽高） */
+    private const val MOOD_TAB_NORM_X = 0.663f
+    private const val MOOD_TAB_NORM_Y = 0.734f
+
     /**
      * 当前发布的文案内容（由循环中临时设置）
      */
@@ -260,60 +274,100 @@ object KuaishouPublisher {
     }
 
     /**
-     * 查找“文字”按钮（FrameLayout 下的 TextView，text="文字"）
+     * 查找「文字」tab（TextView，`mood_tab_tv`）
      */
     private fun findTextButton(): AccessibilityNodeInfo? {
-        // 遍历 FrameLayout，查找其子节点中 text="文字" 的 TextView
-        AssistsCore.findByTags("android.widget.FrameLayout").forEach { frameLayout ->
-            frameLayout.findByTags("android.widget.TextView").forEach { textView ->
-                val text = textView.text?.toString().orEmpty()
-                if (text == "文字") {
-                    return textView
-                }
+        AssistsCore.findByTags("android.widget.TextView").forEach { textView ->
+            val resId = textView.viewIdResourceName.orEmpty()
+            val text = textView.text?.toString().orEmpty()
+            if (resId == MOOD_TAB_RESOURCE_ID && text == "文字") {
+                return textView
             }
         }
-        
-        // 回退方案：直接按文本查找 TextView
         AssistsCore.findByText("文字").forEach { node ->
-            if (node.className?.contains("TextView") == true) {
+            if (node.viewIdResourceName.orEmpty() == MOOD_TAB_RESOURCE_ID) {
                 return node
             }
         }
-        
         return null
     }
 
     /**
-     * 点击"文字"按钮（参考 DouyinPublisher 的完整点击策略）
+     * 固定像素：点击 weditor 记录的 rect 中心。
      */
-    private suspend fun KuaishouContext.clickTextButton(): Boolean {
-        val button = findTextButton() ?: run {
-            log("❌ 未找到文字按钮")
-            return false
-        }
-
-        showClickEffect(button, "快手 文字按钮")
-        delay(300)
-
-        repeat(10) { round ->
-            log("🔁 文字按钮点击重试: 第 ${round + 1} 轮")
-            button.refresh()
-            if (tryClickTextButtonOnce(button)) {
-                delay(250)
+    private suspend fun KuaishouContext.clickTextButtonByFixedPixel(): Boolean {
+        repeat(3) { round ->
+            val ox = MOOD_TAB_FIXED_CENTER_X + round * 2
+            val oy = MOOD_TAB_FIXED_CENTER_Y + round * 2
+            log("🔁 文字 tab 固定像素: 第 ${round + 1} 轮 ($ox, $oy)")
+            showClickEffect(ox, oy, "文字 tab 固定像素")
+            delay(80)
+            if (AssistsCore.gestureClick(ox, oy, duration = 90)) {
+                log("✅ 固定像素手势已发送")
+                delay(350)
                 return true
             }
-
-            // 额外偏移手势补点
-            val b = button.getBoundsInScreen()
-            val x = b.centerX().toFloat() + round * 2
-            val y = b.centerY().toFloat() + round * 2
-            showClickEffect(x, y, "额外偏移手势 (round ${round + 1})")
-            delay(80)
-            AssistsCore.gestureClick(x, y, duration = 90)
             delay(200)
         }
+        return false
+    }
 
-        log("❌ 所有点击方式多轮重试后仍未触发")
+    /**
+     * 屏幕比例：width×[MOOD_TAB_NORM_X]，height×[MOOD_TAB_NORM_Y]。
+     */
+    private suspend fun KuaishouContext.clickTextButtonByScreenRatio(): Boolean {
+        val w = ScreenUtils.getScreenWidth().toFloat()
+        val h = ScreenUtils.getScreenHeight().toFloat()
+        repeat(3) { round ->
+            val x = w * MOOD_TAB_NORM_X + round * 2
+            val y = h * MOOD_TAB_NORM_Y + round * 2
+            log("🔁 文字 tab 屏幕比例: 第 ${round + 1} 轮 → ($x, $y)")
+            showClickEffect(x, y, "文字 tab 屏幕比例")
+            delay(80)
+            if (AssistsCore.gestureClick(x, y, duration = 90)) {
+                log("✅ 屏幕比例手势已发送")
+                delay(350)
+                return true
+            }
+            delay(200)
+        }
+        return false
+    }
+
+    /**
+     * 点击「文字」tab：先无障碍多策略，再固定像素中心，再屏幕比例。
+     */
+    private suspend fun KuaishouContext.clickTextButton(): Boolean {
+        val button = findTextButton()
+        if (button != null) {
+            showClickEffect(button, "快手 文字按钮")
+            delay(300)
+
+            repeat(10) { round ->
+                log("🔁 文字按钮点击重试: 第 ${round + 1} 轮")
+                button.refresh()
+                if (tryClickTextButtonOnce(button)) {
+                    delay(250)
+                    return true
+                }
+
+                val b = button.getBoundsInScreen()
+                val x = b.centerX().toFloat() + round * 2
+                val y = b.centerY().toFloat() + round * 2
+                showClickEffect(x, y, "额外偏移手势 (round ${round + 1})")
+                delay(80)
+                AssistsCore.gestureClick(x, y, duration = 90)
+                delay(200)
+            }
+            log("⚠️ 无障碍点击文字 tab 未成功，尝试固定像素 / 屏幕比例")
+        } else {
+            log("⚠️ 未找到 mood_tab_tv「文字」节点，使用固定像素 / 屏幕比例")
+        }
+
+        if (clickTextButtonByFixedPixel()) return true
+        if (clickTextButtonByScreenRatio()) return true
+
+        log("❌ 文字 tab：无障碍与坐标兜底均未完成")
         return false
     }
 

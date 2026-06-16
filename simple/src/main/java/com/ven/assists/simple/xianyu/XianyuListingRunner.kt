@@ -43,7 +43,7 @@ object XianyuListingRunner {
     private const val DRAFT_PUBLISH_ROUNDS = 5
     private const val PAGE_SETTLE_MS = 1_200L
     /** 每次点击「发布」后短暂等待 */
-    private const val POST_PUBLISH_CLICK_WAIT_MS = 900L
+    private const val POST_PUBLISH_CLICK_WAIT_MS = 1_500L
     /** 判定发布成功前等待页面稳定 */
     private const val POST_PUBLISH_SETTLE_MS = 2_000L
     private const val PUBLISH_SUCCESS_MAX_MS = 35_000L

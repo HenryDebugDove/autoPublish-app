@@ -11,6 +11,9 @@ import com.ven.assists.simple.overlays.OverlayBasic
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.simple.douyin.DouyinPublisher
 import com.ven.assists.simple.kuaishou.KuaishouPublisher
+import com.ven.assists.simple.xianyu.XianyuBatchRunner
+import com.ven.assists.simple.xianyu.XianyuListingRunner
+import com.ven.assists.simple.xianyu.XianyuPolishRunner
 
 import com.ven.assists.utils.CoroutineWrapper
 import kotlinx.coroutines.Job
@@ -183,6 +186,7 @@ object ControlPanelBridge {
                 "publish" -> handlePublishCommand(data)
                 "publish_douyin" -> handleDouyinPublishCommand(data)
                 "publish_kuaishou" -> handleKuaishouPublishCommand(data)
+                "xianyu_task" -> handleXianyuTaskCommand(data)
                 "config" -> applyConfigFromServer(data)
                 else -> Log.d(TAG, "未知消息: $text")
             }
@@ -228,6 +232,36 @@ object ControlPanelBridge {
             runCatching {
                 KuaishouPublisher.publish(OverlayBasic.createWeiboAutomationContext())
             }.onFailure { Log.e(TAG, "执行快手发布失败: ${it.message}") }
+        }
+    }
+
+    private fun handleXianyuTaskCommand(json: JSONObject) {
+        when (json.optString("action")) {
+            "refresh" -> {
+                sendAck("xianyu_refresh_received")
+                CoroutineWrapper.launch(isMain = true) {
+                    runCatching {
+                        XianyuBatchRunner.run(XianyuBatchRunner.createLogOnlyContext())
+                    }.onFailure { Log.e(TAG, "执行闲鱼刷新消息失败: ${it.message}") }
+                }
+            }
+            "polish" -> {
+                sendAck("xianyu_polish_received")
+                CoroutineWrapper.launch(isMain = true) {
+                    runCatching {
+                        XianyuPolishRunner.run(XianyuPolishRunner.createLogOnlyContext())
+                    }.onFailure { Log.e(TAG, "执行闲鱼擦亮失败: ${it.message}") }
+                }
+            }
+            "listing" -> {
+                sendAck("xianyu_listing_received")
+                CoroutineWrapper.launch(isMain = true) {
+                    runCatching {
+                        XianyuListingRunner.run(XianyuListingRunner.createLogOnlyContext())
+                    }.onFailure { Log.e(TAG, "执行闲鱼上架失败: ${it.message}") }
+                }
+            }
+            else -> Log.w(TAG, "未知闲鱼任务 action: ${json.optString("action")}")
         }
     }
 

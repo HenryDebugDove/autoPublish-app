@@ -7,6 +7,8 @@ import com.blankj.utilcode.util.ScreenUtils
 import com.ven.assists.AssistsCore
 import com.ven.assists.AssistsCore.back
 import com.ven.assists.AssistsCore.click
+import com.ven.assists.AssistsCore.findByTags
+import com.ven.assists.AssistsCore.findByText
 import com.ven.assists.AssistsCore.findFirstParentClickable
 import com.ven.assists.AssistsCore.getBoundsInScreen
 import com.ven.assists.AssistsCore.getAllNodes
@@ -24,10 +26,19 @@ import kotlinx.coroutines.yield
 import java.text.Normalizer
 
 /**
- * 闲鱼上架：用户**手动**进入「我发布的 → 草稿」列表页后启动。
- * 点「草稿」Tab → 循环 [OCR 点第一个「编辑」→ 等稳定 → 反复点「发布」直至成功 → 成功页两次返回] 共 [DRAFT_PUBLISH_ROUNDS] 次。
+ * 闲鱼上架：点底部「我的」→「我发布的」→「草稿」Tab，循环发布草稿；
+ * 全部完成后额外返回上一页。
  */
 object XianyuListingRunner {
+
+    private const val TAB_TITLE_ID = "com.taobao.idlefish:id/tab_title"
+    private const val MY_TAB_TEXT = "我的"
+    private const val MY_TAB_REL_X = 0.92f
+    private const val MY_TAB_REL_Y = 0.975f
+    private const val PUBLISHED_DESC_PREFIX = "我发布的"
+    private const val PUBLISHED_ENTRY_WAIT_MAX_MS = 12_000L
+    private const val POST_PUBLISHED_SETTLE_MS = 1_200L
+    private const val PER_STRATEGY_SLICE_MS = 1_100L
 
     private const val DRAFT_PUBLISH_ROUNDS = 5
     private const val PAGE_SETTLE_MS = 1_200L
@@ -79,8 +90,22 @@ object XianyuListingRunner {
     suspend fun run(context: WeiboPublisher.Context) = with(context) {
         stopRequested = false
         AutomationLog.startLongRunningAutomation()
-        log("请确保已手动进入闲鱼「我发布的 → 草稿」列表页。")
         log("将发布 $DRAFT_PUBLISH_ROUNDS 条草稿。")
+
+        if (!openMyTab(this@with)) {
+            log("❌ 未能进入「我的」页，任务结束。")
+            return@with
+        }
+        log("✅ 已进入「我的」页。")
+        if (!clickPublishedEntry(this@with)) {
+            log("❌ 未找到或未点到「我发布的」入口，任务结束。")
+            return@with
+        }
+        log("✅ 已点击「我发布的」入口。")
+        if (!waitPublishedListPageReady(this@with)) {
+            log("⚠️ 「我发布的」页 Tab 栏未就绪，仍尝试点草稿。")
+        }
+        AutomationLog.waitUnlessStopped(POST_PUBLISHED_SETTLE_MS + PAGE_SETTLE_MS)
 
         if (!clickDraftTab(this@with)) {
             log("❌ 未能进入或确认「草稿」Tab，任务结束。")
@@ -124,7 +149,125 @@ object XianyuListingRunner {
         }
         if (!shouldAbort()) {
             log("🎉 闲鱼上架任务结束，成功完成 $successCount/$DRAFT_PUBLISH_ROUNDS 轮。")
+            AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
+            if (back()) {
+                log("✅ 全部草稿发布完成，已返回上一页。")
+            } else {
+                log("⚠️ 全部草稿发布完成，返回上一页未成功。")
+            }
         }
+    }
+
+    private suspend fun openMyTab(ctx: WeiboPublisher.Context): Boolean {
+        repeat(CLICK_RETRY) { attempt ->
+            if (shouldAbort()) return false
+            ctx.log("──────── 进入「我的」第 ${attempt + 1}/$CLICK_RETRY 轮 ────────")
+            val tab = findIdlefishMyTabNode()
+            if (tab != null) {
+                ctx.log("策略① tab_title「我的」")
+                if (clickMyTabQuick(ctx, tab) && waitPublishedEntryVisible(ctx, PER_STRATEGY_SLICE_MS)) return true
+            } else {
+                ctx.log("策略① 跳过：未找到「我的」Tab 节点")
+            }
+            ctx.log("策略② 底部「我的」比例点")
+            if (clickMyTabRatio(ctx) && waitPublishedEntryVisible(ctx, PER_STRATEGY_SLICE_MS)) return true
+            yield()
+        }
+        ctx.log("⚠️ 多轮尝试后仍未出现「我发布的」相关入口")
+        return false
+    }
+
+    private fun findIdlefishMyTabNode(): AccessibilityNodeInfo? {
+        for (node in collectNodesFromAllAccessibilityWindows()) {
+            if (node.viewIdResourceName != TAB_TITLE_ID) continue
+            if (node.text?.toString() != MY_TAB_TEXT) continue
+            return node
+        }
+        findByTags(
+            "android.widget.TextView",
+            viewId = TAB_TITLE_ID,
+            text = MY_TAB_TEXT
+        ).firstOrNull()?.let { return it }
+        findByText(MY_TAB_TEXT).firstOrNull { it.viewIdResourceName == TAB_TITLE_ID }?.let { return it }
+        return null
+    }
+
+    private suspend fun clickMyTabQuick(ctx: WeiboPublisher.Context, tab: AccessibilityNodeInfo): Boolean {
+        ctx.showNodeEffect(tab, "闲鱼 我的Tab")
+        yield()
+        repeat(2) { round ->
+            ctx.log("「我的」快捷点击 ${round + 1}/2")
+            tab.refresh()
+            if (tab.isClickable && tab.click()) return true
+            tab.findFirstParentClickable()?.let { parent -> if (parent.click()) return true }
+            if (tab.clickSelfOrParent()) return true
+            val b = tab.getBoundsInScreen()
+            if (AssistsCore.gestureClick(b.centerX().toFloat(), b.centerY().toFloat(), duration = 65)) return true
+            if (tab.nodeGestureClick()) return true
+            yield()
+        }
+        return false
+    }
+
+    private suspend fun clickMyTabRatio(ctx: WeiboPublisher.Context): Boolean {
+        val w = ScreenUtils.getScreenWidth().toFloat()
+        val h = ScreenUtils.getScreenHeight().toFloat()
+        val x = w * MY_TAB_REL_X
+        val y = h * MY_TAB_REL_Y
+        ctx.log("底部比例点 ($MY_TAB_REL_X, $MY_TAB_REL_Y)")
+        ctx.showPointEffect(x, y, "闲鱼底栏我的")
+        return AssistsCore.gestureClick(x, y, duration = 55)
+    }
+
+    private fun matchesPublishedContentDesc(raw: CharSequence?): Boolean {
+        val s = normalizeDesc(raw)
+        return s.startsWith(PUBLISHED_DESC_PREFIX)
+    }
+
+    private fun findPublishedImageNode(): AccessibilityNodeInfo? {
+        for (node in collectNodesFromAllAccessibilityWindows()) {
+            val pkg = node.packageName?.toString().orEmpty()
+            if (!nodePackageAcceptableForCurrentFish(pkg)) continue
+            if (node.className?.toString() != "android.widget.ImageView") continue
+            if (!matchesPublishedContentDesc(node.contentDescription)) continue
+            val r = Rect()
+            node.getBoundsInScreen(r)
+            if (r.width() <= 0 || r.height() <= 0) continue
+            return node
+        }
+        return null
+    }
+
+    private suspend fun waitPublishedEntryVisible(ctx: WeiboPublisher.Context, maxMs: Long): Boolean {
+        val end = System.currentTimeMillis() + maxMs
+        while (System.currentTimeMillis() < end && !shouldAbort()) {
+            if (findPublishedImageNode() != null) {
+                ctx.log("✅ 已检测到「我发布的」入口节点")
+                return true
+            }
+            yield()
+        }
+        return false
+    }
+
+    private suspend fun clickPublishedEntry(ctx: WeiboPublisher.Context): Boolean {
+        val end = System.currentTimeMillis() + PUBLISHED_ENTRY_WAIT_MAX_MS
+        while (System.currentTimeMillis() < end && !shouldAbort()) {
+            val node = findPublishedImageNode()
+            if (node != null) {
+                ctx.showNodeEffect(node, "我发布的")
+                yield()
+                node.refresh()
+                if (node.isClickable && node.click()) return true
+                node.findFirstParentClickable()?.let { if (it.click()) return true }
+                if (node.clickSelfOrParent()) return true
+                val b = node.getBoundsInScreen()
+                if (AssistsCore.gestureClick(b.centerX().toFloat(), b.centerY().toFloat(), duration = 65)) return true
+                if (node.nodeGestureClick()) return true
+            }
+            yield()
+        }
+        return false
     }
 
     /** 发布成功并回到草稿列表后，随机等待 3～5 秒再发下一条 */
@@ -134,22 +277,49 @@ object XianyuListingRunner {
         AutomationLog.waitUnlessStopped(waitMs)
     }
 
+    /** 等待「我发布的」页 Tab 栏出现（含草稿 Tab 节点） */
+    private suspend fun waitPublishedListPageReady(ctx: WeiboPublisher.Context): Boolean {
+        val end = System.currentTimeMillis() + PUBLISHED_ENTRY_WAIT_MAX_MS
+        while (System.currentTimeMillis() < end && !shouldAbort()) {
+            if (findDraftTabNode() != null) {
+                ctx.log("✅ 「我发布的」页 Tab 栏已就绪")
+                return true
+            }
+            yield()
+        }
+        return false
+    }
+
+    /**
+     * 是否已在「草稿」Tab 且列表就绪。
+     * 不能仅凭 OCR 识别到「编辑」：在售等 Tab 列表项也可能带「编辑」，会误判跳过点草稿。
+     */
+    private suspend fun isDraftListReady(ctx: WeiboPublisher.Context): Boolean {
+        val tab = findDraftTabNode() ?: return false
+        if (!tab.isSelected) return false
+        if (ocrFindFirstEditPosition(ctx) != null) return true
+        return waitDraftListVisible(ctx, 800L)
+    }
+
     private suspend fun clickDraftTab(ctx: WeiboPublisher.Context): Boolean {
         repeat(CLICK_RETRY) { attempt ->
             if (shouldAbort()) return false
             ctx.log("──────── 点「草稿」Tab 第 ${attempt + 1}/$CLICK_RETRY 轮 ────────")
+            if (isDraftListReady(ctx)) {
+                ctx.log("✅ 草稿列表已可见，无需再点 Tab")
+                return true
+            }
             val end = System.currentTimeMillis() + DRAFT_TAB_WAIT_MAX_MS
             while (System.currentTimeMillis() < end && !shouldAbort()) {
-                if (ocrFindFirstEditPosition(ctx) != null) {
-                    ctx.log("✅ 草稿列表已可见（OCR 已识别到「编辑」），无需再点 Tab")
+                if (isDraftListReady(ctx)) {
+                    ctx.log("✅ 草稿列表已可见")
                     return true
                 }
                 val tab = findDraftTabNode()
                 if (tab != null) {
-                    if (tab.isSelected && ocrFindFirstEditPosition(ctx) != null) return true
                     if (clickNodeWithFallbacks(ctx, tab, "草稿Tab")) {
                         AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
-                        if (ocrFindFirstEditPosition(ctx) != null || waitDraftListVisible(ctx, 2_000L)) {
+                        if (isDraftListReady(ctx)) {
                             return true
                         }
                     }
@@ -160,7 +330,7 @@ object XianyuListingRunner {
             ctx.showPointEffect(DRAFT_TAB_ABS_X, DRAFT_TAB_ABS_Y, "草稿Tab")
             if (AssistsCore.gestureClick(DRAFT_TAB_ABS_X, DRAFT_TAB_ABS_Y, duration = 65)) {
                 AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
-                if (ocrFindFirstEditPosition(ctx) != null || waitDraftListVisible(ctx, 2_000L)) {
+                if (isDraftListReady(ctx)) {
                     return true
                 }
             }

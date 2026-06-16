@@ -13,18 +13,21 @@ import com.ven.assists.AssistsCore.findFirstParentClickable
 import com.ven.assists.AssistsCore.getBoundsInScreen
 import com.ven.assists.AssistsCore.getAllNodes
 import com.ven.assists.AssistsCore.nodeGestureClick
+import com.ven.assists.mp.MPManager
 import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.AutomationLog
 import com.ven.assists.simple.common.LogWrapper
 import com.ven.assists.simple.weibo.WeiboPublisher
 import com.ven.assists.stepper.StepManager
+import com.ven.assists.web.utils.TextRecognitionChineseLocator
+import com.ven.assists.window.AssistsWindowManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.yield
 import java.text.Normalizer
 
 /**
  * 闲鱼擦亮：与 [XianyuBatchRunner] 相同枚举本机名称/包名含「闲鱼」的应用，**每个包各跑一遍**：
- * 启动 → 点「我的」→ 点 **content-desc** 以「我发布的」开头的 `ImageView` → 比例点 **(0.178, 0.265)** 容错点击 → **返回**。
+ * 启动 → 点「我的」→ 点 **content-desc** 以「我发布的」开头的 `ImageView` → 点「一键擦亮」（OCR 优先，固定坐标兜底）→ **返回**。
  */
 object XianyuPolishRunner {
 
@@ -34,18 +37,23 @@ object XianyuPolishRunner {
     /** 底部「我的」比例兜底（与 uiautomator 底栏靠右区域一致，随 ROM 可再调） */
     private const val MY_TAB_REL_X = 0.92f
     private const val MY_TAB_REL_Y = 0.975f
-    /** weditor / uiautomator2 识别的擦亮目标点（相对全屏宽高） */
-    private const val POLISH_TAP_REL_X = 0.178f
-    private const val POLISH_TAP_REL_Y = 0.265f
-    /** 比例点容错：像素级微移，避免控件热区略偏 */
+    /** uiautomatorviewer 测得「一键擦亮」屏幕坐标（策略②兜底） */
+    private const val POLISH_TAP_ABS_X = 245f
+    private const val POLISH_TAP_ABS_Y = 750f
+    /** 固定坐标容错：像素级微移 */
     private const val POLISH_TAP_JITTER_PX = 14f
 
     private const val STABILITY_WAIT_MS = 1_200L
     private const val PUBLISHED_ENTRY_WAIT_MAX_MS = 12_000L
+    private const val POST_PUBLISHED_SETTLE_MS = 1_200L
+    private const val OVERLAY_HIDDEN_DELAY_MS = 250L
+    /** OCR 只扫上半屏，减少列表误匹配 */
+    private const val OCR_REGION_HEIGHT_RATIO = 0.45f
     private const val CLICK_RETRY = 2
     private const val PER_STRATEGY_SLICE_MS = 1_100L
 
     private const val PUBLISHED_DESC_PREFIX = "我发布的"
+    private val POLISH_OCR_KEYWORDS = listOf("一键擦亮", "全部擦亮", "擦亮")
 
     @Volatile
     private var stopRequested: Boolean = false
@@ -105,15 +113,18 @@ object XianyuPolishRunner {
             if (!shouldAbort()) {
                 log("✅ [${item.packageName}] 已点击「我发布的」入口。")
             }
-            AutomationLog.waitUnlessStopped(650L)
+            AutomationLog.waitUnlessStopped(POST_PUBLISHED_SETTLE_MS)
             if (shouldAbort()) {
                 log("⚠️ 已请求停止，结束。")
                 return@with
             }
-            val polishTapOk = clickPolishTargetRatioWithRedundancy(this@with)
+            val polishTapOk = clickPolishButton(this@with)
             if (!polishTapOk) {
-                log("⚠️ [${item.packageName}] 比例点 (0.178,0.265) 多轮手势均未报告成功，不执行返回。")
+                log("⚠️ [${item.packageName}] OCR 与固定坐标均未点到「一键擦亮」，不执行返回。")
                 continue
+            }
+            if (!shouldAbort()) {
+                log("✅ [${item.packageName}] 已点击「一键擦亮」。")
             }
             AutomationLog.waitUnlessStopped(320L)
             if (shouldAbort()) {
@@ -195,14 +206,91 @@ object XianyuPolishRunner {
         return false
     }
 
+    /** 策略① OCR → 策略② 固定坐标 (245,750) */
+    private suspend fun clickPolishButton(ctx: WeiboPublisher.Context): Boolean {
+        repeat(CLICK_RETRY) { attempt ->
+            if (shouldAbort()) return false
+            ctx.log("──────── 点击「一键擦亮」第 ${attempt + 1}/$CLICK_RETRY 轮 ────────")
+            ctx.log("策略① OCR 识别")
+            if (clickPolishViaOcr(ctx)) return true
+            ctx.log("策略② 固定坐标 (${POLISH_TAP_ABS_X.toInt()},${POLISH_TAP_ABS_Y.toInt()}) 容错点击")
+            if (clickPolishTargetAbsWithRedundancy(ctx)) return true
+            AutomationLog.waitUnlessStopped(800L)
+        }
+        return false
+    }
+
+    private suspend fun clickPolishViaOcr(ctx: WeiboPublisher.Context): Boolean {
+        for (keyword in POLISH_OCR_KEYWORDS) {
+            if (shouldAbort()) return false
+            val position = ocrFindPolishPosition(ctx, keyword) ?: continue
+            val cx = (position.left + position.right) / 2f
+            val cy = (position.top + position.bottom) / 2f
+            ctx.log("OCR 命中「$keyword」中心 ($cx,$cy) 框=[${position.left},${position.top},${position.right},${position.bottom}]")
+            ctx.showPointEffect(cx, cy, "OCR擦亮")
+            if (AssistsCore.gestureClick(cx, cy, duration = 65)) return true
+        }
+        ctx.log("OCR 未识别到「一键擦亮」相关文字")
+        return false
+    }
+
+    private suspend fun ocrFindPolishPosition(
+        ctx: WeiboPublisher.Context,
+        targetText: String
+    ): TextRecognitionChineseLocator.WordPosition? {
+        AssistsWindowManager.hideAll()
+        delay(OVERLAY_HIDDEN_DELAY_MS)
+        return try {
+            val w = ScreenUtils.getScreenWidth()
+            val h = ScreenUtils.getScreenHeight()
+            val region = Rect(0, 0, w, (h * OCR_REGION_HEIGHT_RATIO).toInt().coerceAtLeast(1))
+            val recognitionResult = runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    TextRecognitionChineseLocator.findWordPositionsInScreenshotRegion(
+                        region = region,
+                        targetText = targetText
+                    )
+                } else {
+                    val bitmap = MPManager.takeScreenshot2Bitmap()
+                        ?: throw IllegalStateException("MediaProjection 截图失败")
+                    try {
+                        TextRecognitionChineseLocator.findWordPositionsInRegion(
+                            bitmap = bitmap,
+                            region = region,
+                            targetText = targetText
+                        )
+                    } finally {
+                        if (!bitmap.isRecycled) bitmap.recycle()
+                    }
+                }
+            }
+            val recognition = recognitionResult.getOrNull()
+            if (recognition == null) {
+                ctx.log("OCR 异常: ${recognitionResult.exceptionOrNull()?.message}")
+                null
+            } else {
+                ctx.log("OCR「$targetText」耗时 ${recognition.processingTimeMillis}ms，匹配 ${recognition.targetPositions.size} 处")
+                pickBestPolishOcrPosition(recognition.targetPositions)
+            }
+        } finally {
+            AssistsWindowManager.showTop()
+        }
+    }
+
+    /** 多候选时优先最靠上、面积较小的框（通常是顶部操作按钮） */
+    private fun pickBestPolishOcrPosition(
+        positions: List<TextRecognitionChineseLocator.WordPosition>
+    ): TextRecognitionChineseLocator.WordPosition? {
+        if (positions.isEmpty()) return null
+        return positions.minWith(compareBy({ it.top }, { it.width * it.height }))
+    }
+
     /**
-     * 在比例点附近做多点、多时长、双击补点；任一 [AssistsCore.gestureClick] 返回 true 即视为本次「点击成功」。
+     * 在 uiautomatorviewer 坐标 (245,750) 附近做多点容错点击。
      */
-    private suspend fun clickPolishTargetRatioWithRedundancy(ctx: WeiboPublisher.Context): Boolean {
-        val w = ScreenUtils.getScreenWidth().toFloat()
-        val h = ScreenUtils.getScreenHeight().toFloat()
-        val bx = w * POLISH_TAP_REL_X
-        val by = h * POLISH_TAP_REL_Y
+    private suspend fun clickPolishTargetAbsWithRedundancy(ctx: WeiboPublisher.Context): Boolean {
+        val bx = POLISH_TAP_ABS_X
+        val by = POLISH_TAP_ABS_Y
         val j = POLISH_TAP_JITTER_PX
         val points = listOf(
             bx to by,
@@ -214,13 +302,10 @@ object XianyuPolishRunner {
             bx + j to by + j,
         )
         var anyOk = false
-        ctx.log("──────── 擦亮比例点 (${POLISH_TAP_REL_X},${POLISH_TAP_REL_Y}) 容错点击 ────────")
         for ((index, pair) in points.withIndex()) {
             if (shouldAbort()) return anyOk
             val (px, py) = pair
-            val relX = (px / w).coerceIn(0f, 1f)
-            val relY = (py / h).coerceIn(0f, 1f)
-            ctx.log("尝试 ${index + 1}/${points.size} 相对 ($relX,$relY)")
+            ctx.log("固定坐标尝试 ${index + 1}/${points.size} ($px,$py)")
             ctx.showPointEffect(px, py, "擦亮")
             val duration = when (index % 3) {
                 0 -> 55L
@@ -231,7 +316,7 @@ object XianyuPolishRunner {
             AutomationLog.waitUnlessStopped(260L)
         }
         if (!shouldAbort()) {
-            ctx.log("中心点双击补点")
+            ctx.log("固定坐标中心双击补点")
             ctx.showPointEffect(bx, by, "擦亮中心")
             if (AssistsCore.gestureClick(bx, by, duration = 45)) anyOk = true
             delay(90)

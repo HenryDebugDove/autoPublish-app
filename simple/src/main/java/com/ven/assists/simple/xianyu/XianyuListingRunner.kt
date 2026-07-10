@@ -67,6 +67,20 @@ object XianyuListingRunner {
 
     private const val EDIT_OCR_KEYWORD = "编辑"
 
+    /** 发布页分类属性 OCR */
+    private const val LABEL_TRAINING_DURATION = "培训时长"
+    private const val LABEL_SERVICE_DURATION = "服务时长"
+    private const val OPTION_TRAINING_30_MIN = "30分钟"
+    private const val LABEL_ESTIMATED_DURATION = "预计工期"
+    private const val OPTION_ESTIMATED_5_10_DAYS = "5-10天"
+    private val OPTION_ESTIMATED_5_10_DAYS_ALTS = listOf("5-10天", "5－10天", "5~10天")
+    /** uiautomator：预计工期选项 View bounds [571,2512][798,2708] 中心（1080×2800 参考屏） */
+    private const val ESTIMATED_5_10_REL_X = 684.5f / 1080f
+    private const val ESTIMATED_5_10_REL_Y = 2610f / 2800f
+    /** uiautomator：培训时长「30分钟」选项比例兜底（与预计工期同布局时可再调） */
+    private const val TRAINING_30_MIN_REL_X = 0.634f
+    private const val TRAINING_30_MIN_REL_Y = 0.85f
+
     private val DRAFT_TAB_DESC_REGEX = Regex("第\\s*2\\s*个标签.*共\\s*3\\s*个")
     private val PUBLISH_DESC_REGEX = Regex("^发布(,\\s*发布)?$")
 
@@ -369,6 +383,7 @@ object XianyuListingRunner {
     private suspend fun publishUntilSuccess(ctx: WeiboPublisher.Context): Boolean {
         val deadline = System.currentTimeMillis() + PUBLISH_SUCCESS_MAX_MS
         var clickAttempts = 0
+        var formPrepared = false
         ctx.log("──────── 反复点击「发布」直至发布成功 ────────")
         while (System.currentTimeMillis() < deadline && !shouldAbort()) {
             if (clickAttempts > 0 && isPublishSucceeded()) {
@@ -380,6 +395,10 @@ object XianyuListingRunner {
                 if (clickAttempts >= PUBLISH_CLICK_MAX_ATTEMPTS) {
                     ctx.log("⚠️ 已达最大点击次数 $PUBLISH_CLICK_MAX_ATTEMPTS，停止继续点「发布」")
                     break
+                }
+                if (!formPrepared) {
+                    preparePublishFormBeforeClick(ctx)
+                    formPrepared = true
                 }
                 clickAttempts++
                 ctx.log("「发布」第 $clickAttempts/$PUBLISH_CLICK_MAX_ATTEMPTS 次点击")
@@ -402,6 +421,253 @@ object XianyuListingRunner {
         }
         ctx.log("⚠️ 发布未成功（共点击「发布」${clickAttempts} 次）")
         return false
+    }
+
+    /**
+     * 进入发布页后、首次点「发布」前：OCR 识别分类属性并点选。
+     * - 有「培训时长」或「服务时长」→ 点「30分钟」
+     * - 有「预计工期」→ 点「5-10天」
+     * - 都没有 → 等页面稳定后直接发布
+     */
+    private suspend fun preparePublishFormBeforeClick(ctx: WeiboPublisher.Context) {
+        ctx.log("──────── 发布页 OCR 预处理分类属性 ────────")
+        AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
+        val hasTrainingDuration = ocrHasTextOnScreen(ctx, LABEL_TRAINING_DURATION)
+        val hasServiceDuration = ocrHasTextOnScreen(ctx, LABEL_SERVICE_DURATION)
+        val hasEstimatedDuration = ocrHasTextOnScreen(ctx, LABEL_ESTIMATED_DURATION)
+        if (!hasTrainingDuration && !hasServiceDuration && !hasEstimatedDuration) {
+            ctx.log("未检测到「$LABEL_TRAINING_DURATION」「$LABEL_SERVICE_DURATION」或「$LABEL_ESTIMATED_DURATION」，等待页面稳定后直接发布")
+            AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
+            return
+        }
+        when {
+            hasTrainingDuration -> {
+                ctx.log("检测到「$LABEL_TRAINING_DURATION」，尝试点选「$OPTION_TRAINING_30_MIN」")
+                if (clickThirtyMinuteOption(ctx, LABEL_TRAINING_DURATION)) {
+                    ctx.log("✅ 已点选「$OPTION_TRAINING_30_MIN」")
+                    AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
+                } else {
+                    ctx.log("⚠️ 未点到「$OPTION_TRAINING_30_MIN」，仍继续尝试发布")
+                }
+            }
+            hasServiceDuration -> {
+                ctx.log("检测到「$LABEL_SERVICE_DURATION」，尝试点选「$OPTION_TRAINING_30_MIN」")
+                if (clickThirtyMinuteOption(ctx, LABEL_SERVICE_DURATION)) {
+                    ctx.log("✅ 已点选「$OPTION_TRAINING_30_MIN」")
+                    AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
+                } else {
+                    ctx.log("⚠️ 未点到「$OPTION_TRAINING_30_MIN」，仍继续尝试发布")
+                }
+            }
+        }
+        if (hasEstimatedDuration) {
+            ctx.log("检测到「$LABEL_ESTIMATED_DURATION」，尝试点选「$OPTION_ESTIMATED_5_10_DAYS」")
+            if (clickEstimatedDurationOption(ctx)) {
+                ctx.log("✅ 已点选「$OPTION_ESTIMATED_5_10_DAYS」")
+                AutomationLog.waitUnlessStopped(PAGE_SETTLE_MS)
+            } else {
+                ctx.log("⚠️ 未点到「$OPTION_ESTIMATED_5_10_DAYS」，仍继续尝试发布")
+            }
+        }
+    }
+
+    private suspend fun clickThirtyMinuteOption(ctx: WeiboPublisher.Context, nearLabel: String): Boolean {
+        ctx.log("策略① content-desc 点选「$OPTION_TRAINING_30_MIN」")
+        findAttributeOptionNode(OPTION_TRAINING_30_MIN)?.let { node ->
+            if (clickNodeWithFallbacks(ctx, node, "30分钟")) return true
+        }
+        ctx.log("策略② OCR 点选「$OPTION_TRAINING_30_MIN」（参照「$nearLabel」）")
+        if (clickOcrOptionNearLabel(ctx, nearLabel, OPTION_TRAINING_30_MIN, listOf(OPTION_TRAINING_30_MIN), "30分钟")) {
+            return true
+        }
+        ctx.log("策略③ 比例坐标点选 30分钟")
+        return clickRatioPoint(ctx, TRAINING_30_MIN_REL_X, TRAINING_30_MIN_REL_Y, "30分钟")
+    }
+
+    private suspend fun clickEstimatedDurationOption(ctx: WeiboPublisher.Context): Boolean {
+        ctx.log("策略① content-desc 点选「$OPTION_ESTIMATED_5_10_DAYS」")
+        findAttributeOptionNode(OPTION_ESTIMATED_5_10_DAYS)?.let { node ->
+            if (clickNodeWithFallbacks(ctx, node, "5-10天")) return true
+        }
+        ctx.log("策略② OCR 点选「$OPTION_ESTIMATED_5_10_DAYS」")
+        if (clickOcrOptionNearLabel(
+                ctx,
+                LABEL_ESTIMATED_DURATION,
+                OPTION_ESTIMATED_5_10_DAYS,
+                OPTION_ESTIMATED_5_10_DAYS_ALTS,
+                "5-10天"
+            )
+        ) {
+            return true
+        }
+        ctx.log("策略③ 比例坐标点选 5-10天")
+        return clickRatioPoint(ctx, ESTIMATED_5_10_REL_X, ESTIMATED_5_10_REL_Y, "5-10天")
+    }
+
+    /** 匹配 content-desc 含「可选…选项文案」的可点 View（如 可选5-10天, 5-10天） */
+    private fun findAttributeOptionNode(optionKeyword: String): AccessibilityNodeInfo? {
+        val normalizedKeyword = compactText(optionKeyword)
+        var best: AccessibilityNodeInfo? = null
+        var bestScore = Int.MIN_VALUE
+        for (node in collectNodesFromAllAccessibilityWindows()) {
+            val pkg = node.packageName?.toString().orEmpty()
+            if (!nodePackageAcceptableForCurrentFish(pkg)) continue
+            val desc = normalizeDesc(node.contentDescription)
+            val descCompact = compactText(desc)
+            if (!descCompact.contains(normalizedKeyword)) continue
+            if (isPureAttributeLabel(descCompact, normalizedKeyword)) continue
+            val r = Rect()
+            node.getBoundsInScreen(r)
+            if (r.width() <= 0 || r.height() <= 0) continue
+            var score = 0
+            if (node.isClickable) score += 4
+            if (desc.contains("可选")) score += 8
+            if (node.className?.toString() == "android.view.View") score += 2
+            if (score > bestScore) {
+                bestScore = score
+                best = node
+            }
+        }
+        return best
+    }
+
+    /** 排除左侧纯标签行（如 content-desc 仅为「预计工期」） */
+    private fun isPureAttributeLabel(descCompact: String, optionKeyword: String): Boolean {
+        if (descCompact.contains("可选")) return false
+        if (descCompact == compactText(LABEL_ESTIMATED_DURATION)) return true
+        if (descCompact == compactText(LABEL_TRAINING_DURATION)) return true
+        if (descCompact == compactText(LABEL_SERVICE_DURATION)) return true
+        if (descCompact == optionKeyword && !descCompact.contains("天") && !descCompact.contains("分钟")) return true
+        return false
+    }
+
+    private fun compactText(raw: CharSequence?): String {
+        return normalizeDesc(raw).replace(" ", "").replace(",", "").replace("，", "")
+    }
+
+    private suspend fun clickOcrOptionNearLabel(
+        ctx: WeiboPublisher.Context,
+        labelText: String,
+        primaryOption: String,
+        optionAlts: List<String>,
+        effectLabel: String
+    ): Boolean {
+        val labelPos = ocrFindWordOnScreen(ctx, labelText) ?: return false
+        val w = ScreenUtils.getScreenWidth()
+        val h = ScreenUtils.getScreenHeight()
+        val scanTop = (labelPos.top - 60).coerceAtLeast(0)
+        val region = Rect(0, scanTop, w, h)
+        for (keyword in optionAlts) {
+            val positions = ocrFindWordPositions(ctx, keyword, region) ?: continue
+            val sameRow = positions.filter { pos ->
+                pos.left >= labelPos.left + 60 && kotlin.math.abs(pos.top - labelPos.top) <= 140
+            }
+            val pick = sameRow.minWithOrNull(compareBy({ it.left }, { it.top }))
+                ?: positions.minWithOrNull(compareBy({ kotlin.math.abs(it.top - labelPos.top) }, { it.left }))
+            if (pick != null && clickOcrPosition(ctx, pick, effectLabel)) return true
+        }
+        return clickOcrWordOnScreen(ctx, primaryOption, effectLabel)
+    }
+
+    private suspend fun clickOcrPosition(
+        ctx: WeiboPublisher.Context,
+        position: TextRecognitionChineseLocator.WordPosition,
+        label: String
+    ): Boolean {
+        val cx = (position.left + position.right) / 2f
+        val cy = (position.top + position.bottom) / 2f
+        ctx.log("OCR 命中($label) 中心 ($cx,$cy) 框=[${position.left},${position.top},${position.right},${position.bottom}]")
+        ctx.showPointEffect(cx, cy, label)
+        repeat(2) {
+            if (AssistsCore.gestureClick(cx, cy, duration = 65)) return true
+            delay(90)
+        }
+        return false
+    }
+
+    private suspend fun clickRatioPoint(
+        ctx: WeiboPublisher.Context,
+        relX: Float,
+        relY: Float,
+        label: String
+    ): Boolean {
+        val w = ScreenUtils.getScreenWidth().toFloat()
+        val h = ScreenUtils.getScreenHeight().toFloat()
+        val cx = w * relX
+        val cy = h * relY
+        ctx.log("比例点 ($relX, $relY) → ($cx,$cy)")
+        ctx.showPointEffect(cx, cy, label)
+        return AssistsCore.gestureClick(cx, cy, duration = 65)
+    }
+
+    private suspend fun ocrHasTextOnScreen(ctx: WeiboPublisher.Context, targetText: String): Boolean {
+        return ocrFindWordOnScreen(ctx, targetText) != null
+    }
+
+    private suspend fun clickOcrWordOnScreen(
+        ctx: WeiboPublisher.Context,
+        targetText: String,
+        label: String
+    ): Boolean {
+        val position = ocrFindWordOnScreen(ctx, targetText) ?: return false
+        val cx = (position.left + position.right) / 2f
+        val cy = (position.top + position.bottom) / 2f
+        ctx.log("OCR 命中「$targetText」($label) 中心 ($cx,$cy) 框=[${position.left},${position.top},${position.right},${position.bottom}]")
+        ctx.showPointEffect(cx, cy, label)
+        return AssistsCore.gestureClick(cx, cy, duration = 65)
+    }
+
+    private suspend fun ocrFindWordOnScreen(
+        ctx: WeiboPublisher.Context,
+        targetText: String,
+        region: Rect? = null
+    ): TextRecognitionChineseLocator.WordPosition? {
+        val w = ScreenUtils.getScreenWidth()
+        val h = ScreenUtils.getScreenHeight()
+        val scanRegion = region ?: Rect(0, 0, w, h)
+        val positions = ocrFindWordPositions(ctx, targetText, scanRegion) ?: return null
+        return pickFirstOcrPosition(positions)
+    }
+
+    private suspend fun ocrFindWordPositions(
+        ctx: WeiboPublisher.Context,
+        targetText: String,
+        region: Rect
+    ): List<TextRecognitionChineseLocator.WordPosition>? {
+        AssistsWindowManager.hideAll()
+        delay(OVERLAY_HIDDEN_DELAY_MS)
+        return try {
+            val recognitionResult = runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    TextRecognitionChineseLocator.findWordPositionsInScreenshotRegion(
+                        region = region,
+                        targetText = targetText
+                    )
+                } else {
+                    val bitmap = MPManager.takeScreenshot2Bitmap()
+                        ?: throw IllegalStateException("MediaProjection 截图失败")
+                    try {
+                        TextRecognitionChineseLocator.findWordPositionsInRegion(
+                            bitmap = bitmap,
+                            region = region,
+                            targetText = targetText
+                        )
+                    } finally {
+                        if (!bitmap.isRecycled) bitmap.recycle()
+                    }
+                }
+            }
+            val recognition = recognitionResult.getOrNull()
+            if (recognition == null) {
+                ctx.log("OCR 异常: ${recognitionResult.exceptionOrNull()?.message}")
+                null
+            } else {
+                ctx.log("OCR「$targetText」耗时 ${recognition.processingTimeMillis}ms，匹配 ${recognition.targetPositions.size} 处")
+                recognition.targetPositions
+            }
+        } finally {
+            AssistsWindowManager.showTop()
+        }
     }
 
     /** 编辑页「发布」按钮已消失，并额外等待页面稳定 */
@@ -429,44 +695,12 @@ object XianyuListingRunner {
     private suspend fun ocrFindFirstEditPosition(
         ctx: WeiboPublisher.Context
     ): TextRecognitionChineseLocator.WordPosition? {
-        AssistsWindowManager.hideAll()
-        delay(OVERLAY_HIDDEN_DELAY_MS)
-        return try {
-            val w = ScreenUtils.getScreenWidth()
-            val h = ScreenUtils.getScreenHeight()
-            val listTop = DRAFT_LIST_MIN_TOP.coerceAtMost(h - 1)
-            val region = Rect(0, listTop, w, h)
-            val recognitionResult = runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    TextRecognitionChineseLocator.findWordPositionsInScreenshotRegion(
-                        region = region,
-                        targetText = EDIT_OCR_KEYWORD
-                    )
-                } else {
-                    val bitmap = MPManager.takeScreenshot2Bitmap()
-                        ?: throw IllegalStateException("MediaProjection 截图失败")
-                    try {
-                        TextRecognitionChineseLocator.findWordPositionsInRegion(
-                            bitmap = bitmap,
-                            region = region,
-                            targetText = EDIT_OCR_KEYWORD
-                        )
-                    } finally {
-                        if (!bitmap.isRecycled) bitmap.recycle()
-                    }
-                }
-            }
-            val recognition = recognitionResult.getOrNull()
-            if (recognition == null) {
-                ctx.log("OCR 异常: ${recognitionResult.exceptionOrNull()?.message}")
-                null
-            } else {
-                ctx.log("OCR「$EDIT_OCR_KEYWORD」耗时 ${recognition.processingTimeMillis}ms，匹配 ${recognition.targetPositions.size} 处")
-                pickFirstOcrPosition(recognition.targetPositions)
-            }
-        } finally {
-            AssistsWindowManager.showTop()
-        }
+        val w = ScreenUtils.getScreenWidth()
+        val h = ScreenUtils.getScreenHeight()
+        val listTop = DRAFT_LIST_MIN_TOP.coerceAtMost(h - 1)
+        val region = Rect(0, listTop, w, h)
+        val positions = ocrFindWordPositions(ctx, EDIT_OCR_KEYWORD, region) ?: return null
+        return pickFirstOcrPosition(positions)
     }
 
     /** 多个「编辑」时取最靠上（top 最小）的第一个 */
@@ -544,6 +778,7 @@ object XianyuListingRunner {
         val fg = AssistsCore.getPackageName().orEmpty()
         if (fg.isNotEmpty() && pkg == fg) return true
         if (pkg.contains("idlefish", ignoreCase = true)) return true
+        if (pkg.contains("dkplugin", ignoreCase = true)) return true
         return XianyuInstalledApps.PACKAGE_MATCH_HINTS.any { pkg.contains(it, ignoreCase = true) }
     }
 

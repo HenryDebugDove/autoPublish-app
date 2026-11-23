@@ -4,7 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
+import android.provider.Settings
 import android.util.Log
+import com.blankj.utilcode.util.Utils
 import com.blankj.utilcode.util.ToastUtils
 import com.ven.assists.service.AssistsService
 import com.ven.assists.simple.overlays.OverlayBasic
@@ -175,6 +177,40 @@ object ControlPanelBridge {
         sendPayload(payload)
     }
 
+    /**
+     * 向控制面板上报发布进度（结构化事件，由 server 转发给管理端）。
+     */
+    fun sendPublishProgress(
+        jobId: String,
+        platform: String,
+        phase: String,
+        current: Int,
+        total: Int,
+        contentPreview: String = "",
+        message: String = ""
+    ) {
+        val payload = JSONObject().apply {
+            put("type", "publish_progress")
+            put("jobId", jobId)
+            put("platform", platform)
+            put("deviceId", currentDeviceId())
+            put("phase", phase)
+            put("current", current)
+            put("total", total)
+            put("contentPreview", contentPreview.take(80))
+            put("message", message)
+            put("timestamp", System.currentTimeMillis())
+        }
+        sendPayload(payload)
+    }
+
+    private fun currentDeviceId(): String {
+        return Settings.Secure.getString(
+            Utils.getApp().contentResolver,
+            Settings.Secure.ANDROID_ID
+        ).orEmpty()
+    }
+
     private fun sendPayload(payload: JSONObject) {
         webSocket?.send(payload.toString())
     }
@@ -218,6 +254,21 @@ object ControlPanelBridge {
             DouyinPublisher.tailTag = douyinTailTag
             Log.d(TAG, "已更新抖音 tailTag: $douyinTailTag")
         }
+        val jobId = json.optString("jobId").ifBlank {
+            "douyin-${System.currentTimeMillis()}"
+        }
+        DouyinPublisher.pendingJobId = jobId
+
+        val templatesFromCmd = mutableListOf<String>()
+        json.optJSONArray("douyinContentTemplates")?.let { arr ->
+            for (i in 0 until arr.length()) {
+                val item = arr.optString(i).trim()
+                if (item.isNotEmpty()) templatesFromCmd.add(item)
+            }
+        }
+        DouyinPublisher.pendingContentTemplates =
+            templatesFromCmd.takeIf { it.isNotEmpty() }
+
         sendAck("publish_douyin_received")
         CoroutineWrapper.launch(isMain = true) {
             runCatching {
@@ -305,7 +356,12 @@ object ControlPanelBridge {
     }
 
     private fun buildDeviceInfo(): JSONObject {
+        val androidId = Settings.Secure.getString(
+            Utils.getApp().contentResolver,
+            Settings.Secure.ANDROID_ID
+        ).orEmpty()
         return JSONObject().apply {
+            put("deviceId", androidId)
             put("manufacturer", Build.MANUFACTURER)
             put("brand", Build.BRAND)
             put("model", Build.MODEL)

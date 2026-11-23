@@ -11,6 +11,7 @@ import com.ven.assists.AssistsCore.nodeGestureClick
 import com.ven.assists.AssistsCore.setNodeText
 import com.ven.assists.AssistsCore.paste
 import com.ven.assists.simple.AutomationLog
+import com.ven.assists.simple.control.ControlPanelBridge
 import com.ven.assists.simple.weibo.WeiboPublisher
 
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +28,17 @@ typealias DouyinContext = WeiboPublisher.Context
  */
 object DouyinPublisher {
     private const val SERVER_BASE_URL = "http://118.25.152.48:4001"
+
+    /** 切换模板后等待「加载中」消失的超时时间 */
+    private const val TEMPLATE_LOAD_TIMEOUT_MS = 30_000L
+    /** 轮询「加载中」/下一步就绪的间隔 */
+    private const val TEMPLATE_LOAD_POLL_MS = 300L
+    /** 加载消失后再稳定一小段，避免遮罩闪烁误判 */
+    private const val TEMPLATE_LOAD_SETTLE_MS = 400L
+    /** 等待「下一步」可点的超时时间 */
+    private const val NEXT_BUTTON_READY_TIMEOUT_MS = 30_000L
+    /** 点击模板后，短暂等待「加载中」出现（避免加载尚未弹出就误判就绪） */
+    private const val TEMPLATE_LOADING_APPEAR_WAIT_MS = 1_200L
     
     /**
      * 抖音文案模板列表，可在外部进行配置
@@ -41,6 +53,14 @@ object DouyinPublisher {
     var tailTag: String = "#前端 #程序员"
         @Synchronized get
         @Synchronized set
+
+    /** 本次发布任务 id（由控制面板下发，用于进度关联） */
+    @Volatile
+    var pendingJobId: String? = null
+
+    /** 本次要发布的文案列表（优先于 /api/config，来自立即发布指令） */
+    @Volatile
+    var pendingContentTemplates: List<String>? = null
 
     private val httpClient = okhttp3.OkHttpClient()
 
@@ -99,55 +119,106 @@ object DouyinPublisher {
 
     suspend fun publish(context: DouyinContext) = with(context) {
         AutomationLog.startLongRunningAutomation()
-        // 启动时优先从控制面板后端获取 tailTag 和 contentTemplates
+        val jobId = pendingJobId?.also { pendingJobId = null }
+            ?: "douyin-${System.currentTimeMillis()}"
+        val templatesFromCmd = pendingContentTemplates.also { pendingContentTemplates = null }
+
+        // 启动时优先从控制面板后端获取 tailTag；文案优先用立即发布指令里的列表
         val remoteConfig = fetchRemoteConfig(log)
-        if (remoteConfig == null) {
+        if (remoteConfig == null && templatesFromCmd.isNullOrEmpty()) {
             log("⚠️ 未能从控制面板获取抖音配置，终止流程")
+            reportProgress(jobId, "job_fail", 0, 0, "", "未能获取抖音配置")
             return@with
         }
-        
-        if (remoteConfig.douyinTailTag.isNotBlank()) {
+
+        if (remoteConfig != null && remoteConfig.douyinTailTag.isNotBlank()) {
             tailTag = remoteConfig.douyinTailTag
             log("已从控制面板更新抖音 tailTag：$tailTag")
         }
-        
-        if (remoteConfig.douyinContentTemplates.isEmpty()) {
-            log("❌ 控制面板返回的 douyinContentTemplates 为空，终止流程")
+
+        val templates = templatesFromCmd?.takeIf { it.isNotEmpty() }
+            ?: remoteConfig?.douyinContentTemplates.orEmpty()
+
+        if (templates.isEmpty()) {
+            log("❌ 抖音文案列表为空，终止流程")
+            reportProgress(jobId, "job_fail", 0, 0, "", "文案列表为空")
             return@with
         }
-        
-        val totalCount = remoteConfig.douyinContentTemplates.size
-        log("📢 抖音发布任务启动，共 $totalCount 条文案需要发布")
-        
-        // 直接使用接口返回的 douyinContentTemplates 数组进行遍历
-        remoteConfig.douyinContentTemplates.forEachIndexed { index, contentTemplate ->
+
+        val totalCount = templates.size
+        log("📢 抖音发布任务启动，共 $totalCount 条文案需要发布（jobId=$jobId）")
+        reportProgress(jobId, "job_start", 0, totalCount, "", "任务启动，共 $totalCount 条")
+
+        var successCount = 0
+        var failCount = 0
+        templates.forEachIndexed { index, contentTemplate ->
             if (AutomationLog.shouldStop()) {
                 log("⚠️ 已停止，结束抖音发布任务")
+                reportProgress(
+                    jobId, "job_stopped", index, totalCount,
+                    contentTemplate, "已停止（完成 $successCount 成功 / $failCount 失败）"
+                )
                 return@with
             }
-            log("\n========== 开始发布第 ${index + 1}/$totalCount 条文案 ==========")
+            val current = index + 1
+            log("\n========== 开始发布第 $current/$totalCount 条文案 ==========")
             log("文案内容: ${contentTemplate.take(50)}...")
-            
-            // 设置当前文案到临时变量
+            reportProgress(
+                jobId, "item_start", current, totalCount,
+                contentTemplate, "开始发布第 $current/$totalCount 条"
+            )
+
             currentContentTemplate = contentTemplate
-            
-            // 执行单次发布流程
             val success = publishSingle(context)
-            
+
             if (success) {
-                log("✅ 第 ${index + 1}/$totalCount 条文案发布成功")
+                successCount++
+                log("✅ 第 $current/$totalCount 条文案发布成功")
+                reportProgress(
+                    jobId, "item_success", current, totalCount,
+                    contentTemplate, "第 $current/$totalCount 条发布成功"
+                )
             } else {
-                log("❌ 第 ${index + 1}/$totalCount 条文案发布失败")
+                failCount++
+                log("❌ 第 $current/$totalCount 条文案发布失败")
+                reportProgress(
+                    jobId, "item_fail", current, totalCount,
+                    contentTemplate, "第 $current/$totalCount 条发布失败"
+                )
             }
-            
-            // 如果不是最后一条，等待 30 秒
+
             if (index < totalCount - 1) {
                 log("⏳ 等待 30 秒后发布下一条文案…（日志浮窗可停止或音量加中断）")
                 AutomationLog.waitUnlessStopped(30_000L)
             }
         }
-        
-        log("\n🎉 抖音发布任务完成，共发布 $totalCount 条文案")
+
+        log("\n🎉 抖音发布任务完成，共 $totalCount 条（成功 $successCount / 失败 $failCount）")
+        reportProgress(
+            jobId, "job_done", totalCount, totalCount, "",
+            "任务完成（成功 $successCount / 失败 $failCount）"
+        )
+    }
+
+    private fun reportProgress(
+        jobId: String,
+        phase: String,
+        current: Int,
+        total: Int,
+        content: String,
+        message: String
+    ) {
+        runCatching {
+            ControlPanelBridge.sendPublishProgress(
+                jobId = jobId,
+                platform = "douyin",
+                phase = phase,
+                current = current,
+                total = total,
+                contentPreview = content,
+                message = message
+            )
+        }
     }
     
     // 当前正在发布的文案
@@ -194,16 +265,29 @@ object DouyinPublisher {
         }
 
         log("⏳ 等待页面稳定，延时5秒...")
-        delay(5000)
-        
+        AutomationLog.waitUnlessStopped(5_000L)
+        if (AutomationLog.shouldStop()) {
+            log("⚠️ 已停止，跳过本条")
+            return@with false
+        }
+
         log("🚧 抖音自动化发布流程（阶段3.5：随机点击话题分类按钮）")
         if (clickRandomTopicButton()) {
             log("✅ 已随机点击话题分类按钮")
+            if (!waitTemplateLoadDone()) {
+                log("❌ 模板加载未完成（超时或已停止），终止本条发布")
+                return@with false
+            }
         } else {
             log("⚠️ 未能点击话题分类按钮，继续流程")
         }
-        
-        delay(5000)
+
+        log("⏳ 等待「下一步」可点击...")
+        if (!waitNextButtonReady()) {
+            log("❌ 「下一步」未就绪（可能仍在加载），终止本条发布")
+            return@with false
+        }
+
         log("🚧 抖音自动化发布流程（阶段4：点击第二个下一步）")
         if (clickNextButtonInFrame()) {
             log("✅ 已点击第二个下一步按钮")
@@ -608,6 +692,108 @@ object DouyinPublisher {
         return null
     }
 
+    /** 是否存在可见的模板「加载中」遮罩 */
+    private fun isTemplateLoadingVisible(): Boolean {
+        return AssistsCore.findByText("加载中").any { node ->
+            runCatching { node.isVisibleToUser }.getOrDefault(true)
+        }
+    }
+
+    /**
+     * 显式等待模板加载完成：
+     * 1) 短暂等「加载中」出现（避免尚未弹出就误判就绪）
+     * 2) 再轮询直至「加载中」消失，并二次确认防闪烁
+     * 网络差时最长等 [TEMPLATE_LOAD_TIMEOUT_MS]。
+     */
+    private suspend fun DouyinContext.waitTemplateLoadDone(
+        timeoutMs: Long = TEMPLATE_LOAD_TIMEOUT_MS
+    ): Boolean {
+        // 阶段1：给加载遮罩一点出现时间
+        val appearDeadline = System.currentTimeMillis() + TEMPLATE_LOADING_APPEAR_WAIT_MS
+        var sawLoading = false
+        while (System.currentTimeMillis() < appearDeadline) {
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 等待模板加载时已停止")
+                return false
+            }
+            if (isTemplateLoadingVisible()) {
+                sawLoading = true
+                break
+            }
+            AutomationLog.waitUnlessStopped(TEMPLATE_LOAD_POLL_MS)
+        }
+
+        // 阶段2：若已出现（或之后又出现），等到消失
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var loggedWaiting = sawLoading
+        if (sawLoading) {
+            log("⏳ 检测到「加载中」，等待模板加载完成...")
+        }
+        while (System.currentTimeMillis() < deadline) {
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 等待模板加载时已停止")
+                return false
+            }
+            if (isTemplateLoadingVisible()) {
+                if (!loggedWaiting) {
+                    log("⏳ 检测到「加载中」，等待模板加载完成...")
+                    loggedWaiting = true
+                }
+                AutomationLog.waitUnlessStopped(TEMPLATE_LOAD_POLL_MS)
+                continue
+            }
+            // 消失后稳定一小段，避免遮罩闪一下又出现
+            AutomationLog.waitUnlessStopped(TEMPLATE_LOAD_SETTLE_MS)
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 等待模板加载时已停止")
+                return false
+            }
+            if (!isTemplateLoadingVisible()) {
+                if (loggedWaiting) {
+                    log("✅ 模板加载完成（「加载中」已消失）")
+                } else {
+                    log("ℹ️ 未检测到「加载中」，判定模板已就绪")
+                }
+                return true
+            }
+        }
+        log("❌ 等待模板加载超时（${timeoutMs}ms），「加载中」仍在")
+        return false
+    }
+
+    /**
+     * 等待第二个「下一步」可点：无加载遮罩且能找到可见的下一步按钮。
+     */
+    private suspend fun DouyinContext.waitNextButtonReady(
+        timeoutMs: Long = NEXT_BUTTON_READY_TIMEOUT_MS
+    ): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            if (AutomationLog.shouldStop()) {
+                log("⚠️ 等待「下一步」就绪时已停止")
+                return false
+            }
+            if (isTemplateLoadingVisible()) {
+                AutomationLog.waitUnlessStopped(TEMPLATE_LOAD_POLL_MS)
+                continue
+            }
+            val nextButton = findNextButtonInFrame()
+            val visible = nextButton != null &&
+                runCatching { nextButton.isVisibleToUser }.getOrDefault(false)
+            if (visible) {
+                AutomationLog.waitUnlessStopped(TEMPLATE_LOAD_SETTLE_MS)
+                if (AutomationLog.shouldStop()) return false
+                if (!isTemplateLoadingVisible() && findNextButtonInFrame() != null) {
+                    log("✅ 「下一步」已就绪")
+                    return true
+                }
+            }
+            AutomationLog.waitUnlessStopped(TEMPLATE_LOAD_POLL_MS)
+        }
+        log("❌ 等待「下一步」就绪超时（${timeoutMs}ms）")
+        return false
+    }
+
     /**
      * 随机点击 RecyclerView 下的话题分类按钮
      */
@@ -733,6 +919,14 @@ object DouyinPublisher {
 
         repeat(5) { round ->
             log("🔁 第二个下一步按钮点击重试: 第 ${round + 1} 轮")
+            if (AutomationLog.shouldStop()) return false
+
+            // 重试过程中若再次出现加载遮罩，先等其消失再点
+            if (isTemplateLoadingVisible()) {
+                log("⏳ 点击前又出现「加载中」，先等待...")
+                if (!waitTemplateLoadDone()) return false
+            }
+
             nextButton.refresh()
             
             // 方式1: 直接点击 TextView

@@ -27,27 +27,48 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 连接 PC 端控制面板的 WebSocket 客户端，负责：
  * 1. 保持心跳，汇报设备状态
  * 2. 接收后台的配置 / 发布指令并执行微博自动化
+ *
+ * 连接策略：应用层心跳 + OkHttp ping；断开后指数退避重连，避免固定间隔打爆服务端。
  */
 object ControlPanelBridge {
     private const val TAG = "ControlPanelBridge"
-    private const val HEARTBEAT_INTERVAL = 10_000L
+    /** 应用层心跳间隔；需明显小于服务端 HEARTBEAT_TIMEOUT */
+    private const val HEARTBEAT_INTERVAL = 8_000L
+    private const val RECONNECT_BASE_MS = 1_000L
+    private const val RECONNECT_MAX_MS = 30_000L
+    private const val TOAST_COOLDOWN_MS = 60_000L
     private const val SERVER_BASE_URL = "http://118.25.152.48:4001"
     private const val WS_URL = "ws://118.25.152.48:4001/ws"
 
     private val okHttpClient = OkHttpClient.Builder()
         .pingInterval(HEARTBEAT_INTERVAL, TimeUnit.MILLISECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS) // WebSocket 长连接不设读超时
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     @Volatile
     private var webSocket: WebSocket? = null
 
+    /** 正在握手中的 socket，用于忽略已被替换连接的迟到回调 */
+    @Volatile
+    private var pendingSocket: WebSocket? = null
+
     private var heartbeatJob: Job? = null
+    private var reconnectJob: Job? = null
     private var started = false
+    private val connecting = AtomicBoolean(false)
+    private val reconnectAttempt = AtomicInteger(0)
+    @Volatile
+    private var lastDisconnectToastAt = 0L
 
     enum class ConnectionStatus {
         DISCONNECTED, CONNECTING, CONNECTED
@@ -68,7 +89,11 @@ object ControlPanelBridge {
     }
 
     fun reconnectNow() {
-        webSocket?.close(1000, "manual reconnect")
+        reconnectAttempt.set(0)
+        reconnectJob?.cancel()
+        reconnectJob = null
+        closeSocketQuietly("manual reconnect")
+        connecting.set(false)
         updateStatus(ConnectionStatus.CONNECTING)
         connect()
     }
@@ -91,14 +116,50 @@ object ControlPanelBridge {
         }
     }
 
+    private fun closeSocketQuietly(reason: String) {
+        stopHeartbeat()
+        val old = webSocket
+        val pending = pendingSocket
+        webSocket = null
+        pendingSocket = null
+        runCatching { old?.close(1000, reason) }
+        if (pending != null && pending !== old) {
+            runCatching { pending.cancel() }
+        }
+    }
+
+    private fun isActiveSocket(ws: WebSocket): Boolean {
+        return ws === webSocket || ws === pendingSocket
+    }
+
     private fun connect() {
+        if (!started) return
+        if (!connecting.compareAndSet(false, true)) {
+            Log.d(TAG, "已有连接尝试进行中，跳过")
+            return
+        }
+        if (webSocket != null && status == ConnectionStatus.CONNECTED) {
+            connecting.set(false)
+            return
+        }
+        updateStatus(ConnectionStatus.CONNECTING)
+        Log.i(TAG, "正在连接控制面板: $WS_URL (attempt=${reconnectAttempt.get()})")
         val request = Request.Builder().url(WS_URL).build()
-        okHttpClient.newWebSocket(request, socketListener)
+        pendingSocket = okHttpClient.newWebSocket(request, socketListener)
     }
 
     private val socketListener = object : WebSocketListener() {
         override fun onOpen(ws: WebSocket, response: Response) {
+            if (!isActiveSocket(ws)) {
+                runCatching { ws.close(1000, "stale open") }
+                return
+            }
+            reconnectJob?.cancel()
+            reconnectJob = null
+            pendingSocket = null
             webSocket = ws
+            connecting.set(false)
+            reconnectAttempt.set(0)
             Log.i(TAG, "WebSocket 已连接")
             updateStatus(ConnectionStatus.CONNECTED)
             sendRegister()
@@ -106,38 +167,71 @@ object ControlPanelBridge {
         }
 
         override fun onMessage(ws: WebSocket, text: String) {
+            if (webSocket !== ws) return
             handleMessage(text)
         }
 
         override fun onClosed(ws: WebSocket, code: Int, reason: String) {
+            if (!isActiveSocket(ws)) {
+                Log.d(TAG, "忽略非当前连接关闭: $code $reason")
+                return
+            }
             Log.w(TAG, "WebSocket 已关闭: $code $reason")
-            stopHeartbeat()
-            updateStatus(ConnectionStatus.DISCONNECTED)
-            ToastUtils.showShort("控制面板连接已断开")
-            reconnect()
+            onSocketLost(ws, showToast = code != 1000)
         }
 
         override fun onFailure(ws: WebSocket, t: Throwable, response: Response?) {
+            if (!isActiveSocket(ws)) {
+                Log.d(TAG, "忽略非当前连接失败: ${t.message}")
+                return
+            }
             Log.e(TAG, "WebSocket 连接失败: ${t.message}")
-            stopHeartbeat()
-            updateStatus(ConnectionStatus.DISCONNECTED)
-            ToastUtils.showShort("控制面板连接失败: ${t.message ?: "未知错误"}")
-            reconnect()
+            onSocketLost(ws, showToast = true, detail = t.message)
         }
     }
 
-    private fun reconnect() {
+    private fun onSocketLost(ws: WebSocket?, showToast: Boolean, detail: String? = null) {
+        if (ws != null && !isActiveSocket(ws)) return
+        stopHeartbeat()
+        if (webSocket === ws) webSocket = null
+        if (pendingSocket === ws) pendingSocket = null
+        connecting.set(false)
+        updateStatus(ConnectionStatus.DISCONNECTED)
+        if (showToast) {
+            maybeToastDisconnect(detail)
+        }
+        scheduleReconnect()
+    }
+
+    private fun maybeToastDisconnect(detail: String?) {
+        val now = System.currentTimeMillis()
+        if (now - lastDisconnectToastAt < TOAST_COOLDOWN_MS) return
+        lastDisconnectToastAt = now
+        val msg = if (detail.isNullOrBlank()) {
+            "控制面板连接已断开，正在重连…"
+        } else {
+            "控制面板连接失败: $detail"
+        }
+        ToastUtils.showShort(msg)
+    }
+
+    private fun scheduleReconnect() {
         if (!started) return
-        CoroutineWrapper.launch {
-            delay(5000)
+        reconnectJob?.cancel()
+        val attempt = reconnectAttempt.getAndIncrement()
+        val delayMs = (RECONNECT_BASE_MS * (1L shl attempt.coerceAtMost(5)))
+            .coerceAtMost(RECONNECT_MAX_MS)
+        Log.i(TAG, "将在 ${delayMs}ms 后重连 (attempt=$attempt)")
+        reconnectJob = CoroutineWrapper.launch {
+            delay(delayMs)
             connect()
-            updateStatus(ConnectionStatus.CONNECTING)
         }
     }
 
     private fun startHeartbeatLoop() {
         heartbeatJob?.cancel()
         heartbeatJob = CoroutineWrapper.launch {
+            // 连上后立刻再打一枪心跳，缩短「注册后到被认作在线」窗口
             while (true) {
                 sendHeartbeat()
                 delay(HEARTBEAT_INTERVAL)
@@ -212,7 +306,16 @@ object ControlPanelBridge {
     }
 
     private fun sendPayload(payload: JSONObject) {
-        webSocket?.send(payload.toString())
+        val ws = webSocket
+        if (ws == null) {
+            Log.w(TAG, "发送失败：WebSocket 未连接 (${payload.optString("type")})")
+            return
+        }
+        val ok = runCatching { ws.send(payload.toString()) }.getOrDefault(false)
+        if (!ok) {
+            Log.w(TAG, "WebSocket send 返回 false，触发重连")
+            onSocketLost(ws, showToast = false)
+        }
     }
 
     private fun handleMessage(text: String) {
@@ -224,6 +327,10 @@ object ControlPanelBridge {
                 "publish_kuaishou" -> handleKuaishouPublishCommand(data)
                 "xianyu_task" -> handleXianyuTaskCommand(data)
                 "config" -> applyConfigFromServer(data)
+                "ping" -> sendPayload(JSONObject().apply {
+                    put("type", "pong")
+                    put("timestamp", System.currentTimeMillis())
+                })
                 else -> Log.d(TAG, "未知消息: $text")
             }
         }.onFailure {
@@ -370,4 +477,3 @@ object ControlPanelBridge {
         }
     }
 }
-
